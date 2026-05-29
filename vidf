@@ -1,0 +1,237 @@
+#!/bin/sh
+
+# vidf - Version Manager for ESP-IDF.
+#
+# Copyright (C) 2026 Oscar Pernia
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Implemented as a POSIX-compliant shell function. To initialize the tool,
+# this script must be executed directly at least once to trigger the installation.
+# Subsequent executions and daily usage require sourcing the script to manage
+# ESP-IDF environments correctly.
+#
+# This tool is inspired by NVM (Node Version Manager) project,
+# but for managing ESP-IDF (Espressif IoT Development Framework) installations
+# and environments.
+
+{ # Ensures the entire script is downloaded
+
+_vidf_is_sourced ()
+{
+  if [ -n "$ZSH_VERSION" ]
+  then
+    case "$ZSH_EVAL_CONTEXT" in
+      *:file:*|*:file|file:*|file)
+        return 0
+        ;;
+    esac
+  else  # Add additional POSIX-compatible shell names here, if needed.
+    case "${0##*/}" in
+      dash|-dash|bash|-bash|ksh|-ksh|sh|-sh)
+        return 0
+        ;;
+    esac
+  fi
+  return 1
+}
+
+_vidf_err()
+{
+  echo "$*" >&2
+}
+
+_vidf_has()
+{
+  type "${1-}" >/dev/null 2>&1
+  return "$?"
+}
+
+_vidf_user_confirms()
+{
+  local PREDICATE
+  PREDICATE="${1-"Is this ok?"}"
+  PREDICATE="$PREDICATE [y/N]: "
+
+  local CANCELLED
+  CANCELLED="${2-"Operation cancelled."}"
+
+  printf "$PREDICATE" >&2
+
+  while true
+  do
+    read -r opt
+    case "$opt" in
+      [yY][eE][sS]|[yY])
+        return 0
+        ;;
+      [nN][oO]|[nN]|"")
+        _vidf_err "$CANCELLED"
+        return 1
+        ;;
+      *)
+        printf "Please enter (y)es or (n)o: " >&2
+        ;;
+    esac
+  done
+}
+
+vidf()
+{
+  # Handle shell flags first, this is in order to avoid any unexpected
+  # behaviours before executing any important commands that modifies the system.
+
+  local DEFAULT_IFS
+  DEFAULT_IFS=" $(echo t | command tr t \\t)
+"
+  case "$-" in
+    *e*)
+      set +e
+      local EXIT_CODE
+      IFS="${DEFAULT_IFS}" vidf "$@"
+      EXIT_CODE="$?"
+      set -e
+      return "$EXIT_CODE"
+      ;;
+    *a*)
+      set +a
+      local EXIT_CODE
+      IFS="${DEFAULT_IFS}" vidf "$@"
+      EXIT_CODE="$?"
+      set -a
+      return "$EXIT_CODE"
+      ;;
+    *E*)
+      # Only if running on Bash
+      if [ -n "${BASH-}" ]
+      then
+        set +E
+        local EXIT_CODE
+        IFS="${DEFAULT_IFS}" vidf "$@"
+        EXIT_CODE="$?"
+        set -E
+        return "$EXIT_CODE"
+      fi
+      ;;
+    *)
+      if [ "${IFS}" != "${DEFAULT_IFS}" ]
+      then
+        IFS="${DEFAULT_IFS}" vidf "$@"
+        return "$?"
+      fi
+      ;;
+  esac
+
+  : "${VIDF_DIR:="$HOME/.vidf"}"
+
+  if [ -e "$VIDF_DIR" ] && ! [ -d "$VIDF_DIR" ]
+  then
+    _vidf_err "Path specified by VIDF_DIR (\`$VIDF_DIR\`) is not a directory,"
+    _vidf_err "try setting \`VIDF_DIR\` to another path,"
+    _vidf_err "or delete the previously mentioned path before continuing."
+    return 1
+  fi
+
+  if [ "$#" -lt 1 ]
+  then
+    vidf --help
+    return 1
+  fi
+
+  for i in "$@"
+  do
+    case "$i" in
+      --)
+        break
+        ;;
+      -h|--help)
+        echo ""
+        echo "Version Manager for ESP-IDF"
+        echo ""
+        echo "Usage:"
+        echo "  vidf -h|--help    Shows this message"
+        return 0
+        ;;
+    esac
+  done
+
+  local SUBCOMMAND
+  SUBCOMMAND="$1"
+
+  case "$SUBCOMMAND" in
+    help)
+      vidf --help
+      ;;
+    self-update)
+      if ! [ -e "$VIDF_DIR" ]
+      then
+        # Offer VIDF installation to the user.
+
+        # Print short GPL notice
+        _vidf_err "Welcome to VIDF (Version Manager for ESP-IDF)"
+        _vidf_err "Copyright (C) 2026 Oscar Pernia"
+        _vidf_err "This program comes with ABSOLUTELY NO WARRANTY."
+        _vidf_err "This is free software, and you are welcome to redistribute it"
+        _vidf_err "under certain conditions."
+        _vidf_err ""
+
+        if ! _vidf_user_confirms "Do you wish to install VIDF on \`$VIDF_DIR\`?"
+        then
+          return 1
+        fi
+
+        # TODO: All of the VIDF repository cloning logic
+        if _vidf_has git
+        then
+          :
+        elif _vidf_has curl
+        then
+          :
+        elif _vidf_has wget
+        then
+          :
+        else
+          _vidf_err "Needs one of \`git\`, \`curl\` or \`wget\` in order to install VIDF."
+          return 1
+        fi
+
+        return 0
+      fi
+
+      # TODO: The rest of the logic for `self-update`-ing
+      ;;
+    *)
+      _vidf_err "Unknown subcommand: $SUBCOMMAND"
+      vidf --help
+      return 1
+      ;;
+  esac
+}
+
+if ! _vidf_is_sourced
+then
+  if [ "$#" -ne 0 ]
+  then
+    _vidf_err "You must source this script in order to use it."
+    _vidf_err ""
+    _vidf_err "If you wish to install VIDF, run it without any arguments first."
+    _vidf_err "Try running \`yes | vidf\` in order to perform a default installation."
+    exit 1
+  fi
+
+  # Trigger auto-installation.
+  vidf self-update
+fi
+
+} # Ensures the entire script is downloaded
