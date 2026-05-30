@@ -339,7 +339,7 @@ vidf()
       ;;
     *)
       _vidf_err "Unknown subcommand: $SUBCOMMAND"
-      vidf help >&2
+      vidf help "$@" >&2
       return 1
       ;;
   esac
