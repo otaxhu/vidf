@@ -163,7 +163,7 @@ _vidf_help_render()
         printf "%s%s" "$(_vidf_style_bold)" "$LINE"
         ;;
       # Command option styles
-      "$(printf "%*s" 12 "")"--*)
+      "$(printf "%*s" 12 "")"-*)
         printf "%s%s" "$(_vidf_style_bold)" "$LINE"
         ;;
       # Bypass styles
@@ -256,16 +256,6 @@ vidf()
   # First setup based on tty detection.
   _vidf_style_setup
 
-  : "${VIDF_DIR:="$HOME/.vidf"}"
-
-  if [ -e "$VIDF_DIR" ] && ! [ -d "$VIDF_DIR" ]
-  then
-    _vidf_err "Path specified by VIDF_DIR (\`$VIDF_DIR\`) is not a directory,"
-    _vidf_err "try setting \`VIDF_DIR\` to another path,"
-    _vidf_err "or delete the previously mentioned path before continuing."
-    return 1
-  fi
-
   if [ "$#" -lt 1 ]
   then
     vidf help >&2
@@ -273,15 +263,28 @@ vidf()
   fi
 
   local SUBCOMMAND
-  SUBCOMMAND="$1"
 
   # Check all arguments and handle the global options, as well
-  # as handling the -- delimiter
+  # as handling the -- delimiter. We filter and handle all global options
+  # from the final arguments, -- is not filtered because subcommands are
+  # supposed to handle it.
+  local i
+  local EOO # End Of Options, is -- present?
+  EOO=0
   for i in "$@"
   do
+    # Do a circular shift filter, we don't use arrays because they are
+    # not available on POSIX shells.
+    shift
+    if [ "$EOO" = 1 ]
+    then
+      set -- "$@" "$i"
+      continue
+    fi
     case "$i" in
       --)
-        break
+        EOO=1
+        set -- "$@" "$i"
         ;;
       -h|--help)
         SUBCOMMAND=help
@@ -292,8 +295,26 @@ vidf()
       --no-color)
         _vidf_style_setup 0
         ;;
+      *)
+        set -- "$@" "$i"
+        ;;
     esac
   done
+
+  if [ -z "$SUBCOMMAND" ]
+  then
+    if [ -z "${1:-}" ]
+    then
+      _vidf_err "You must specify a subcommand."
+
+      # We can't do recursive `vidf help` call because then we will lose
+      # --[no-]color option.
+      _vidf_help_render >&2
+      return 1
+    fi
+    SUBCOMMAND="$1"
+    shift
+  fi
 
   case "$SUBCOMMAND" in
     help)
@@ -339,7 +360,7 @@ vidf()
       ;;
     *)
       _vidf_err "Unknown subcommand: $SUBCOMMAND"
-      vidf help "$@" >&2
+      _vidf_help_render >&2
       return 1
       ;;
   esac
@@ -347,17 +368,18 @@ vidf()
 
 if ! _vidf_is_sourced
 then
-  if [ "$#" -ne 0 ]
+  if ! [ -e "$(_vidf_app_dir)" ]
   then
-    _vidf_err "You must source this script in order to use it."
-    _vidf_err ""
-    _vidf_err "If you wish to install VIDF, run it without any arguments first."
-    _vidf_err "Try running \`yes | vidf\` in order to perform a default installation."
-    exit 1
+    # Assume the user is running the script for the first time and is
+    # piping it, most likely from curl.
+
+    # Trigger auto-installation. Bypass flags that may be included such as -y
+    vidf self-update "$@"
+    exit "$?"
   fi
 
-  # Trigger auto-installation.
-  vidf self-update
+  _vidf_err "You must source this script in order to use it."
+    exit 1
 fi
 
 } # Ensures the entire script is downloaded
