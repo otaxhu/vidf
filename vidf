@@ -475,7 +475,7 @@ vidf()
   esac
 }
 
-if ! _vidf_is_sourced
+if ! _vidf_is_sourced && [ "$_VIDF_TEST" != 1 ]
 then
   if ! [ -e "$(_vidf_app_dir)" ]
   then
