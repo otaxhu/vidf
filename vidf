@@ -58,14 +58,34 @@ _vidf_has()
   return "$?"
 }
 
+# You must pass to it at least 2 arguments, the predicate and the cancelled message.
+# A default value is provided for this two, so you can pass empty strings.
+#
+# Flags:
+#
+# -y: Automatically confirms
 _vidf_user_confirms()
 {
   local PREDICATE
-  PREDICATE="${1-"Is this ok?"}"
-  PREDICATE="$PREDICATE [y/N]: "
+  PREDICATE="${1:-"Is this ok?"} [y/N]: "
 
   local CANCELLED
-  CANCELLED="${2-"Operation cancelled."}"
+  CANCELLED="${2:-"Operation cancelled."}"
+
+  shift 2
+
+  local i
+  for i in "$@"
+  do
+    case "$i" in
+      --)
+        break
+        ;;
+      -y)
+        return 0
+        ;;
+    esac
+  done
 
   printf "$PREDICATE" >&2
 
@@ -85,6 +105,82 @@ _vidf_user_confirms()
         ;;
     esac
   done
+}
+
+_vidf_app_dir()
+{
+  printf "%s" "${VIDF_DIR:-"$HOME/.vidf"}"
+}
+
+# NOTE: We don't use getopts because it doesn't accept long options
+#
+# The $1 format parameter is similar to getopts format, except that
+# it starts with the minimum number of required positional arguments,
+# followed by a comma-separated list of valid short and long options.
+#
+# Example format: "2,-y,--prefix:,--version"
+_vidf_check_args()
+{
+  local FORMAT
+  FORMAT="$1"
+  shift
+
+  local EXPECTED_ARG_COUNT
+  EXPECTED_ARG_COUNT="${FORMAT%%,*}"
+
+  local FLAGS
+  if [ "$FORMAT" = "$EXPECTED_ARG_COUNT" ]
+  then
+    FLAGS=""
+  else
+    FLAGS="${FORMAT#*,},"
+  fi
+
+  local ARG_COUNT
+  ARG_COUNT=0
+
+  while [ "$#" -gt 0 ]
+  do
+    case "$1" in
+      --)
+        shift
+        ARG_COUNT="$((ARG_COUNT + $#))"
+        break
+        ;;
+      -*)
+        if [ "$FLAGS" != "${FLAGS#*"$1":,*}" ]
+        then
+          if [ "$#" -lt 2 ]
+          then
+            _vidf_err "Option \`$1\` requires an argument."
+            return 1
+          fi
+
+          shift 2
+          continue
+        fi
+
+        if [ "$FLAGS" != "${FLAGS#*"$1",*}" ]
+        then
+          shift
+          continue
+        fi
+
+        _vidf_err "Unexpected option \`$1\`."
+        return 1
+        ;;
+      *)
+        ARG_COUNT=$((ARG_COUNT + 1))
+        shift
+        ;;
+    esac
+  done
+
+  if [ "$ARG_COUNT" -ne "$EXPECTED_ARG_COUNT" ]
+  then
+    _vidf_err "Expected $EXPECTED_ARG_COUNT positional arguments, but got $ARG_COUNT."
+    return 1
+  fi
 }
 
 # ANSI color styles logic. {{{
@@ -188,6 +284,8 @@ COMMANDS
         Options:
             --version <$(_vidf_style_underline)version$(_vidf_style_reset)>
                 Specify a concrete vidf $(_vidf_style_underline)version$(_vidf_style_reset) to update/downgrade to.
+            -y
+                Automatic yes to all prompts.
 
     help
         Shows this message.
@@ -321,6 +419,10 @@ vidf()
       _vidf_help_render
       ;;
     self-update)
+      if ! _vidf_check_args 0,-y,--version: "$@"
+      then
+        return 1
+      fi
       if ! [ -e "$VIDF_DIR" ]
       then
         # Offer VIDF installation to the user.
@@ -333,7 +435,9 @@ vidf()
         _vidf_err "under certain conditions."
         _vidf_err ""
 
-        if ! _vidf_user_confirms "Do you wish to install VIDF on \`$VIDF_DIR\`?"
+        if ! _vidf_user_confirms "Do you wish to install VIDF on \`$VIDF_DIR\`?" \
+                                 "Operation cancelled. If you wish to choose another directory for the installation, please set \`VIDF_DIR\` variable." \
+                                 "$@"
         then
           return 1
         fi
@@ -379,7 +483,7 @@ then
   fi
 
   _vidf_err "You must source this script in order to use it."
-    exit 1
+  exit 1
 fi
 
 } # Ensures the entire script is downloaded
