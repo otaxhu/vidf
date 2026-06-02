@@ -117,26 +117,36 @@ _vidf_app_dir()
 # NOTE: We don't use getopts because it doesn't accept long options
 #
 # The $1 format parameter is similar to getopts format, except that
-# it starts with the minimum number of required positional arguments,
-# followed by a comma-separated list of valid short and long options.
+# it starts with the minimum and maximum number of required positional
+# arguments, followed by a comma-separated list of valid short and long
+# options.
 #
-# Example format: "2,-y,--prefix:,--version"
+# Basic format:
+# "2,-y,--prefix:,--version"
+#
+# Format for variadic arguments, minimum 0 args and maximum 2 args:
+# "0-2,-y,--prefix:,--version"
 _vidf_check_args()
 {
   local format
   format="$1"
   shift
 
-  local expected_arg_count
-  expected_arg_count="${format%%,*}"
+  local expected_arg_range
+  expected_arg_range="${format%%,*}"
 
   local flags
-  if [ "$format" = "$expected_arg_count" ]
+  if [ "$format" = "$expected_arg_range" ]
   then
     flags=""
   else
     flags="${format#*,},"
   fi
+
+  local expected_min_args
+  expected_min_args="${expected_arg_range%%-*}"
+  local expected_max_args
+  expected_max_args="${expected_arg_range#*-}"
 
   local arg_count
   arg_count=0
@@ -178,9 +188,14 @@ _vidf_check_args()
     esac
   done
 
-  if [ "$arg_count" -ne "$expected_arg_count" ]
+  if [ "$arg_count" -lt "$expected_min_args" ]
   then
-    _vidf_err "Expected $expected_arg_count positional arguments, but got $arg_count."
+    _vidf_err "Too few arguments. Expected at least $expected_min_args, got $arg_count."
+    return 1
+  fi
+
+  if [ "$arg_count" -gt "$expected_max_args" ]; then
+    _vidf_err "Too many arguments. Expected at most $expected_max_args, got $arg_count."
     return 1
   fi
 }
