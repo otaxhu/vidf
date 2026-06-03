@@ -293,23 +293,19 @@ _vidf_help_render()
 
   done << EOF # You can add more styles to the here-doc below if the above ones doesn't fully style it.
 
-vidf - Version Manager for ESP-IDF
+vidf - Version Manager for ESP-IDF ($(vidf --version))
 
 USAGE
     vidf <command> [options] [--] [arguments]
 
 COMMANDS
-    self-update
-        Upgrades vidf to the latest version.
+    self-update [$(_vidf_style_underline)version$(_vidf_style_reset)]
+        Updates vidf to the latest release. If a specific $(_vidf_style_underline)version$(_vidf_style_reset)
+        is provided, that version will be installed instead.
 
         Options:
-            --version <$(_vidf_style_underline)version$(_vidf_style_reset)>
-                Specify a concrete vidf $(_vidf_style_underline)version$(_vidf_style_reset) to update/downgrade to.
             -y
                 Automatic yes to all prompts.
-
-    help
-        Shows this message.
 
 OPTIONS
     -h, --help
@@ -317,6 +313,9 @@ OPTIONS
 
     --[no-]color
         Enable or disable ANSI color output explicitly.
+
+    -v, --version
+        Prints currently installed vidf version and exits.
 
     --
         Delimits end of option processing. Any subsequent arguments
@@ -377,14 +376,6 @@ vidf()
   # First setup based on tty detection.
   _vidf_style_setup
 
-  if [ "$#" -lt 1 ]
-  then
-    vidf help >&2
-    return 1
-  fi
-
-  local subcommand
-
   # Check all arguments and handle the global options, as well
   # as handling the -- delimiter. We filter and handle all global options
   # from the final arguments, -- is not filtered because subcommands are
@@ -392,6 +383,7 @@ vidf()
   local i
   local eoo # End Of Options, is -- present?
   eoo=0
+  local flag_action
   for i in "$@"
   do
     # Do a circular shift filter, we don't use arrays because they are
@@ -408,7 +400,7 @@ vidf()
         set -- "$@" "$i"
         ;;
       -h|--help)
-        subcommand=help
+        flag_action=help
         ;;
       --color)
         _vidf_style_setup 1
@@ -416,31 +408,46 @@ vidf()
       --no-color)
         _vidf_style_setup 0
         ;;
+      -v|--version)
+        # Add here the flag actions that may have higher priority
+        case "$flag_action" in
+          help)
+            :
+            ;;
+          *)
+            flag_action=version
+            ;;
+        esac
+        ;;
       *)
         set -- "$@" "$i"
         ;;
     esac
   done
 
-  if [ -z "$subcommand" ]
-  then
-    if [ -z "${1:-}" ]
-    then
-      _vidf_err "You must specify a subcommand."
-
-      # We can't do recursive `vidf help` call because then we will lose
-      # --[no-]color option.
-      _vidf_help_render >&2
-      return 1
-    fi
-    subcommand="$1"
-    shift
-  fi
-
-  case "$subcommand" in
+  case "$flag_action" in
     help)
       _vidf_help_render
+      return 0
       ;;
+    version)
+      echo "$_VIDF_VERSION"
+      return 0
+      ;;
+  esac
+
+  if [ -z "${1:-}" ]
+  then
+    _vidf_err "You must specify a subcommand."
+    _vidf_help_render >&2
+    return 1
+  fi
+
+  local subcommand
+  subcommand="$1"
+  shift
+
+  case "$subcommand" in
     self-update)
       if ! _vidf_check_args 0,-y,--version: "$@"
       then
