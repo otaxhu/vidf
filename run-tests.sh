@@ -1,8 +1,10 @@
 #!/bin/sh
 
-_VIDF_TEST=1 source ./vidf
+_VIDF_TEST=1 . ./vidf
 
+# shellcheck disable=SC2016
 _EVAL_EXPECTED_SUCCESS='[ "$?" -ne 0 ] && echo "Expected success, got failure: on line $LINENO" >&2 && exit 1'
+# shellcheck disable=SC2016
 _EVAL_EXPECTED_FAILURE='[ "$?" -eq 0 ] && echo "Expected failure, got success: on line $LINENO" >&2 && exit 1'
 
 # 1. Pure functions, basic unit tests

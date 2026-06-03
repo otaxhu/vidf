@@ -1,0 +1,54 @@
+#!/bin/sh
+
+# Always run the latest hooks/pre-commit script, so setup-devel.sh can
+# be ran only once.
+if [ "$_VIDF_RUN_PRECOMMIT" != 1 ]
+then
+  _VIDF_RUN_PRECOMMIT=1 exec "$(git rev-parse --show-toplevel)/hooks/pre-commit"
+  # Should reach this only if exec failed
+  exit "$?"
+fi
+
+git_top_level="$(git rev-parse --show-toplevel)"
+
+staged_scripts="$(git diff --cached --name-only --diff-filter=d |
+  awk -v "git_top_level=$git_top_level" '
+    /\.sh$|^vidf$|^hooks\// {
+      print git_top_level "/" $0
+    }
+  ')"
+
+if [ -n "$staged_scripts" ]
+then
+  if ! type shellcheck >/dev/null 2>&1
+  then
+    echo "\`shellcheck\` is not installed! You must use it in order to check" >&2
+    echo "that your changes to the script are POSIX-compliant/fully compatible with most shells." >&2
+    exit 1
+  fi
+  if ! (printf "%s" "$staged_scripts" | xargs -d "\n" shellcheck)
+  then
+    echo "\`shellcheck\` failed to check the staging scripts!" >&2
+    exit 1
+  fi
+
+  echo "Scripts are POSIX compliant (or mostly)!" >&2
+
+  if ! type beautysh >/dev/null 2>&1
+  then
+    echo "\`beautysh\` is not installed! You must use it in order to check the scripts are formatted correctly." >&2
+    echo "" >&2
+    echo "Try running this in order to install it: \`python3 -m pip install beautysh\`" >&2
+    exit 1
+  fi
+
+  if ! (printf "%s" "$staged_scripts" | xargs -d "\n" beautysh --check -i 2)
+  then
+    echo "\`beautysh\` failed to check the format for the staging scripts!" >&2
+    exit 1
+  fi
+
+  echo "Scripts are formatted correctly!" >&2
+fi
+
+exit 0

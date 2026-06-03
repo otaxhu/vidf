@@ -27,7 +27,11 @@
 # but for managing ESP-IDF (Espressif IoT Development Framework) installations
 # and environments.
 
+# @formatter:off
 { # Ensures the entire script is downloaded
+# @formatter:on
+
+_VIDF_VERSION="0.1.0-devel"
 
 _vidf_is_sourced ()
 {
@@ -268,27 +272,26 @@ _vidf_help_render()
   while IFS="" read -r line
   do
     case "$line" in
-      # Title sections styles
       USAGE|COMMANDS|OPTIONS)
+        # Title sections styles
         printf "%s%s" "$(_vidf_style_bold)" "$line"
         ;;
-      # Commands styles
       "$(printf "%*s" 4 "")"[a-zA-Z0-9]*)
+        # Commands styles
         printf "%s%s" "$(_vidf_style_bold)" "$line"
         ;;
-      # Command option styles
       "$(printf "%*s" 12 "")"-*)
+        # Command option styles
         printf "%s%s" "$(_vidf_style_bold)" "$line"
         ;;
-      # Bypass styles
       *)
+        # Bypass styles
         printf "%s" "$line"
         ;;
     esac
     printf "%s\n" "$(_vidf_style_reset)"
 
-  # You can add more styles to the here-doc below if the above ones doesn't fully style it.
-  done << EOF
+  done << EOF # You can add more styles to the here-doc below if the above ones doesn't fully style it.
 
 vidf - Version Manager for ESP-IDF
 
@@ -443,7 +446,7 @@ vidf()
       then
         return 1
       fi
-      if ! [ -e "$VIDF_DIR" ]
+      if ! [ -e "$(_vidf_app_dir)/vidf" ]
       then
         # Offer VIDF installation to the user.
 
@@ -455,29 +458,28 @@ vidf()
         _vidf_err "under certain conditions."
         _vidf_err ""
 
-        if ! _vidf_user_confirms "Do you wish to install VIDF on \`$VIDF_DIR\`?" \
-                                 "Operation cancelled. If you wish to choose another directory for the installation, please set \`VIDF_DIR\` variable." \
-                                 "$@"
+        if ! _vidf_user_confirms \
+          "Do you wish to install VIDF on \`$(_vidf_app_dir)\`?" \
+          "Operation cancelled. If you wish to choose another directory for the installation, please set \`VIDF_DIR\` variable." \
+          "$@"
         then
           return 1
         fi
+      fi
 
-        # TODO: All of the VIDF repository cloning logic
-        if _vidf_has git
-        then
-          :
-        elif _vidf_has curl
-        then
-          :
-        elif _vidf_has wget
-        then
-          :
-        else
-          _vidf_err "Needs one of \`git\`, \`curl\` or \`wget\` in order to install VIDF."
-          return 1
-        fi
-
-        return 0
+      # TODO: All of the VIDF repository cloning logic
+      if _vidf_has git
+      then
+        :
+      elif _vidf_has curl
+      then
+        :
+      elif _vidf_has wget
+      then
+        :
+      else
+        _vidf_err "Needs one of \`git\`, \`curl\` or \`wget\` in order to install VIDF."
+        return 1
       fi
 
       # TODO: The rest of the logic for `self-update`-ing
@@ -498,6 +500,8 @@ then
     # piping it, most likely from curl.
 
     # Trigger auto-installation. Bypass flags that may be included such as -y
+    _vidf_err "No installation found. Running: vidf self-update $*"
+
     vidf self-update "$@"
     exit "$?"
   fi
@@ -506,4 +510,6 @@ then
   exit 1
 fi
 
+# @formatter:off
 } # Ensures the entire script is downloaded
+# @formatter:on
