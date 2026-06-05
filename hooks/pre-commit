@@ -26,7 +26,7 @@ then
     echo "that your changes to the script are POSIX-compliant/fully compatible with most shells." >&2
     exit 1
   fi
-  if ! (printf "%s" "$staged_scripts" | xargs -d "\n" shellcheck)
+  if ! (printf "%s" "$staged_scripts" | xargs -d "\n" shellcheck -x)
   then
     echo "\`shellcheck\` failed to check the staging scripts!" >&2
     exit 1
