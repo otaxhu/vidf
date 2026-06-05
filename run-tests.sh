@@ -81,4 +81,31 @@ eval "$_EVAL_EXPECTED_SUCCESS"
 _vidf_check_args "$_TEST_CHECK_ARGS_FORMAT" some-arg other-arg --foo -f --bar bar-arg -b b-arg
 eval "$_EVAL_EXPECTED_FAILURE"
 
+# Open-ended range (infinite arguments)
+
+_TEST_CHECK_ARGS_FORMAT="0+,--foo,-f,--bar:,-b:"
+
+# Success 0 args
+_vidf_check_args "$_TEST_CHECK_ARGS_FORMAT" --foo -f --bar bar-arg -b b-arg
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# Success multiple args (multi-step test)
+
+# Generate a list of random arguments
+set --
+while read -r rand_num
+do
+  set -- "$@" "arg_$rand_num"
+done << EOF
+$(seq 0 $(($(awk '
+  BEGIN {
+    srand()
+    print int(rand()*32768)
+  }') % 16)))
+EOF
+
+_vidf_check_args "$_TEST_CHECK_ARGS_FORMAT" --foo -f --bar bar-arg -b b-arg "$@"
+eval "$_EVAL_EXPECTED_SUCCESS"
+set --
+
 exit 0
