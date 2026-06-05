@@ -123,13 +123,17 @@ _vidf_app_dir()
 # The $1 format parameter is similar to getopts format, except that
 # it starts with the minimum and maximum number of required positional
 # arguments, followed by a comma-separated list of valid short and long
-# options.
+# options. You can also pass a plus sign (+) after the minimum required
+# positional arguments to indicate the user can pass infinite arguments.
 #
 # Basic format:
 # "2,-y,--prefix:,--version"
 #
 # Format for variadic arguments, minimum 0 args and maximum 2 args:
 # "0-2,-y,--prefix:,--version"
+#
+# Infinite arguments, minimum 1:
+# "1+,-y,--prefix:,--version"
 _vidf_check_args()
 {
   local format
@@ -140,17 +144,24 @@ _vidf_check_args()
   expected_arg_range="${format%%,*}"
 
   local flags
-  if [ "$format" = "$expected_arg_range" ]
-  then
-    flags=""
-  else
-    flags="${format#*,},"
-  fi
+  [ -n "${format#*,}" ] && flags="${format#*,},"
 
   local expected_min_args
-  expected_min_args="${expected_arg_range%%-*}"
   local expected_max_args
-  expected_max_args="${expected_arg_range#*-}"
+  case "$expected_arg_range" in
+    *+)
+      expected_min_args="${expected_arg_range%+}"
+      expected_max_args=-1
+      ;;
+    *-*)
+      expected_min_args="${expected_arg_range%%-*}"
+      expected_max_args="${expected_arg_range#*-}"
+      ;;
+    *)
+      expected_min_args="$expected_arg_range"
+      expected_max_args="$expected_arg_range"
+      ;;
+  esac
 
   local arg_count
   arg_count=0
@@ -162,6 +173,13 @@ _vidf_check_args()
         shift
         arg_count="$((arg_count + $#))"
         break
+        ;;
+      -*:)
+        # Edge case: User may pass literal "--foo:" as a flag, and the current code
+        # is going to treat it as a boolean option, rather than a valued option if
+        # the format string contains "--foo:,".
+        _vidf_err "Unexpected option \`$1\`."
+        return 1
         ;;
       -*)
         if [ "$flags" != "${flags#*"$1":,*}" ]
@@ -198,10 +216,99 @@ _vidf_check_args()
     return 1
   fi
 
-  if [ "$arg_count" -gt "$expected_max_args" ]; then
+  if [ "$expected_max_args" -ne -1 ] && [ "$arg_count" -gt "$expected_max_args" ]
+  then
     _vidf_err "Too many arguments. Expected at most $expected_max_args, got $arg_count."
     return 1
   fi
+}
+
+# This function outputs to stdout a shell program to be eval'd by the caller,
+# which is going to parse the arguments/flags of the user, and save it to
+# flag variables specified on $2, and the parsed positional arguments are going
+# to be saved on the caller's argument list, e.g. $1, $2, $3, ..., $N, etc.
+#
+# Function's parameters:
+#
+# - $1: Format specifier, see _vidf_check_args.
+#
+# - $2: Comma-separated flag shell variables list, their positions must correspond to
+# the positions on the format specifier, if the format specifier doesn't list
+# any flags, then you MUST NOT pass this argument, not even an empty string,
+# you must directly pass the user's $@ list after $1.
+#
+# - $@: User's arguments.
+_vidf_parse_args_eval()
+{
+  local format
+  format="$1"
+  shift
+
+  local flag_vars
+  [ -n "${format#*,}" ] && flag_vars="$1" && shift
+
+  if ! _vidf_check_args "$format" "$@"
+  then
+    echo "false"
+    return 0
+  fi
+
+  local expected_flags
+  expected_flags="${format#*,}"
+
+  # Separate in newlines for better handling
+  expected_flags="$(printf "%s" "$expected_flags" | sed 's/,/\n/g')"
+  flag_vars="$(printf "%s" "$flag_vars" | sed 's/,/\n/g')"
+
+  local set_args_eval
+  local sanitized_arg
+  while [ "$#" -gt 0 ]
+  do
+    case "$1" in
+      --)
+        shift
+        while [ "$#" -gt 0 ]
+        do
+          sanitized_arg="$(printf "%s" "$1" | sed 's/"/\\"/g')"
+          set_args_eval="$set_args_eval \"$sanitized_arg\""
+          shift
+        done
+        break
+        ;;
+      -*)
+        local target_var
+        local has_value
+        has_value=0
+
+        local flag_line_num
+        flag_line_num="$(printf "%s" "$expected_flags" | grep -xnF -- "$1:" | cut -d: -f1)"
+        if [ -n "$flag_line_num" ]
+        then
+          has_value=1
+          shift
+        else
+          flag_line_num="$(printf "%s" "$expected_flags" | grep -xnF -- "$1" | cut -d: -f1)"
+        fi
+
+        target_var="$(printf "%s\n" "$flag_vars" | sed -n "${flag_line_num}p")"
+
+        if [ "$has_value" = 1 ]
+        then
+          sanitized_arg="$(printf "%s" "$1" | sed 's/"/\\"/g')"
+          printf "%s\n" "$target_var=\"$sanitized_arg\""
+        else
+          printf "%s\n" "$target_var=1"
+        fi
+        ;;
+      *)
+        sanitized_arg="$(printf "%s" "$1" | sed 's/"/\\"/g')"
+        set_args_eval="$set_args_eval \"$sanitized_arg\""
+        ;;
+    esac
+    shift
+  done
+
+  printf "set --%s\n" " $set_args_eval"
 }
 
 # ANSI color styles logic. {{{
@@ -449,7 +556,8 @@ vidf()
 
   case "$subcommand" in
     self-update)
-      if ! _vidf_check_args 0,-y,--version: "$@"
+      local yes_flag
+      if ! eval "$(_vidf_parse_args_eval 0-1,-y yes_flag "$@")"
       then
         return 1
       fi
