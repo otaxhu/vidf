@@ -77,21 +77,6 @@ _vidf_user_confirms()
   local cancelled
   cancelled="${2:-"Operation cancelled."}"
 
-  shift 2
-
-  local i
-  for i in "$@"
-  do
-    case "$i" in
-      --)
-        break
-        ;;
-      -y)
-        return 0
-        ;;
-    esac
-  done
-
   printf "%s" "$predicate" >&2
 
   while true
@@ -575,8 +560,7 @@ vidf()
 
         if ! _vidf_user_confirms \
           "Do you wish to install VIDF on \`$(_vidf_app_dir)\`?" \
-          "Operation cancelled. If you wish to choose another directory for the installation, please set \`VIDF_DIR\` variable." \
-          "$@"
+          "Operation cancelled. If you wish to choose another directory for the installation, please set \`VIDF_DIR\` variable."
         then
           return 1
         fi
