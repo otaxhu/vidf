@@ -69,22 +69,22 @@ _vidf_err()
 
 _vidf_error()
 {
-  _vidf_err "$(_vidf_style_red)$(_vidf_style_bold)$*$(_vidf_style_reset)"
+  _vidf_err "$(_vidf_style_red)$*$(_vidf_style_reset)"
 }
 
 _vidf_warn()
 {
-  _vidf_err "$(_vidf_style_yellow)$(_vidf_style_bold)$*$(_vidf_style_reset)"
+  _vidf_err "$(_vidf_style_yellow)$*$(_vidf_style_reset)"
 }
 
 _vidf_info()
 {
-  _vidf_err "$(_vidf_style_cyan)$(_vidf_style_bold)$*$(_vidf_style_reset)"
+  _vidf_err "$(_vidf_style_cyan)$*$(_vidf_style_reset)"
 }
 
 _vidf_success()
 {
-  _vidf_err "$(_vidf_style_green)$(_vidf_style_bold)$*$(_vidf_style_reset)"
+  _vidf_err "$(_vidf_style_green)$*$(_vidf_style_reset)"
 }
 
 _vidf_has()
@@ -614,8 +614,11 @@ vidf()
         _vidf_err "under certain conditions."
         _vidf_err ""
 
-        _vidf_info "vidf is going to be installed on \`$(_vidf_app_dir)\`."
-        _vidf_info "If you wish to choose another directory for the installation, please cancel, set \`VIDF_DIR\` variable and try again."
+        _vidf_info "$(_vidf_style_bold)vidf$(_vidf_style_unbold) is going to be installed on" \
+                   "$(_vidf_style_bold)$(_vidf_app_dir)$(_vidf_style_unbold)"
+        _vidf_info "If you wish to choose another directory for the installation, please cancel, set" \
+                   "$(_vidf_style_underline)VIDF_DIR$(_vidf_style_ununderline)" \
+                   "variable and try again."
         if ! _vidf_user_confirms
         then
           return 1
@@ -655,7 +658,7 @@ then
     # piping it, most likely from curl.
 
     # Trigger auto-installation. Bypass flags that may be included such as -y
-    _vidf_info "No installation found. Running: vidf self-update $*"
+    _vidf_info "No installation found. Running: $(_vidf_style_bold)vidf self-update $*"
 
     vidf self-update "$@"
     exit "$?"
