@@ -52,9 +52,39 @@ _vidf_is_sourced ()
   return 1
 }
 
+_vidf_echo()
+{
+  while [ "$#" -gt 1 ]
+  do
+    printf "%s " "$1"
+    shift
+  done
+  printf "%s\n" "${1:-}"
+}
+
 _vidf_err()
 {
-  echo "$*" >&2
+  _vidf_echo "$@" >&2
+}
+
+_vidf_error()
+{
+  _vidf_err "$(_vidf_style_red)$(_vidf_style_bold)$*$(_vidf_style_reset)"
+}
+
+_vidf_warn()
+{
+  _vidf_err "$(_vidf_style_yellow)$(_vidf_style_bold)$*$(_vidf_style_reset)"
+}
+
+_vidf_info()
+{
+  _vidf_err "$(_vidf_style_cyan)$(_vidf_style_bold)$*$(_vidf_style_reset)"
+}
+
+_vidf_success()
+{
+  _vidf_err "$(_vidf_style_green)$(_vidf_style_bold)$*$(_vidf_style_reset)"
 }
 
 _vidf_has()
@@ -79,23 +109,34 @@ _vidf_user_confirms()
 
   printf "%s" "$predicate" >&2
 
+  local opt
+  local read_exit_code
   while true
   do
-    local opt
     read -r opt
+    read_exit_code="$?"
+    # Fixes visual bug where if you pipe `yes | vidf ...` you are going to
+    # have the lines squished up on the same line.
+    if ! [ -t 0 ] || [ "$read_exit_code" -ne 0 ]
+    then
+      _vidf_err ""
+      [ "$read_exit_code" -ne 0 ] && break
+    fi
     case "$opt" in
       [yY][eE][sS]|[yY])
         return 0
         ;;
       [nN][oO]|[nN]|"")
-        _vidf_err "$cancelled"
-        return 1
+        break
         ;;
       *)
         printf "Please enter (y)es or (n)o: " >&2
         ;;
     esac
   done
+
+  _vidf_error "$cancelled"
+  return 1
 }
 
 _vidf_app_dir()
@@ -163,7 +204,7 @@ _vidf_check_args()
         # Edge case: User may pass literal "--foo:" as a flag, and the current code
         # is going to treat it as a boolean option, rather than a valued option if
         # the format string contains "--foo:,".
-        _vidf_err "Unexpected option \`$1\`."
+        _vidf_error "Unexpected option \`$1\`."
         return 1
         ;;
       -*)
@@ -171,7 +212,7 @@ _vidf_check_args()
         then
           if [ "$#" -lt 2 ]
           then
-            _vidf_err "Option \`$1\` requires an argument."
+            _vidf_error "Option \`$1\` requires an argument."
             return 1
           fi
 
@@ -185,7 +226,7 @@ _vidf_check_args()
           continue
         fi
 
-        _vidf_err "Unexpected option \`$1\`."
+        _vidf_error "Unexpected option \`$1\`."
         return 1
         ;;
       *)
@@ -197,13 +238,13 @@ _vidf_check_args()
 
   if [ "$arg_count" -lt "$expected_min_args" ]
   then
-    _vidf_err "Too few arguments. Expected at least $expected_min_args, got $arg_count."
+    _vidf_error "Too few arguments. Expected at least $expected_min_args, got $arg_count."
     return 1
   fi
 
   if [ "$expected_max_args" -ne -1 ] && [ "$arg_count" -gt "$expected_max_args" ]
   then
-    _vidf_err "Too many arguments. Expected at most $expected_max_args, got $arg_count."
+    _vidf_error "Too many arguments. Expected at most $expected_max_args, got $arg_count."
     return 1
   fi
 }
@@ -234,7 +275,7 @@ _vidf_parse_args_eval()
 
   if ! _vidf_check_args "$format" "$@"
   then
-    echo "false"
+    _vidf_echo "false"
     return 0
   fi
 
@@ -438,7 +479,7 @@ vidf()
   # behaviours before executing any important commands that modifies the system.
 
   local default_ifs
-  default_ifs=" $(echo t | command tr t \\t)
+  default_ifs=" $(_vidf_echo t | command tr t \\t)
 "
   case "$-" in
     *e*)
@@ -538,14 +579,14 @@ vidf()
       return 0
       ;;
     version)
-      echo "$_VIDF_VERSION"
+      _vidf_echo "$_VIDF_VERSION"
       return 0
       ;;
   esac
 
   if [ -z "${1:-}" ]
   then
-    _vidf_err "You must specify a subcommand."
+    _vidf_error "You must specify a subcommand."
     _vidf_help_render >&2
     return 1
   fi
@@ -573,8 +614,8 @@ vidf()
         _vidf_err "under certain conditions."
         _vidf_err ""
 
-        _vidf_err "vidf is going to be installed on \`$(_vidf_app_dir)\`."
-        _vidf_err "If you wish to choose another directory for the installation, please cancel, set \`VIDF_DIR\` variable and try again."
+        _vidf_info "vidf is going to be installed on \`$(_vidf_app_dir)\`."
+        _vidf_info "If you wish to choose another directory for the installation, please cancel, set \`VIDF_DIR\` variable and try again."
         if ! _vidf_user_confirms
         then
           return 1
@@ -592,14 +633,14 @@ vidf()
       then
         :
       else
-        _vidf_err "Needs one of \`git\`, \`curl\` or \`wget\` in order to install vidf."
+        _vidf_error "Needs one of \`git\`, \`curl\` or \`wget\` in order to install vidf."
         return 1
       fi
 
       # TODO: The rest of the logic for `self-update`-ing
       ;;
     *)
-      _vidf_err "Unknown subcommand: $subcommand"
+      _vidf_error "Unknown subcommand: $subcommand"
       _vidf_help_render >&2
       return 1
       ;;
@@ -614,13 +655,13 @@ then
     # piping it, most likely from curl.
 
     # Trigger auto-installation. Bypass flags that may be included such as -y
-    _vidf_err "No installation found. Running: vidf self-update $*"
+    _vidf_info "No installation found. Running: vidf self-update $*"
 
     vidf self-update "$@"
     exit "$?"
   fi
 
-  _vidf_err "You must source this script in order to use it."
+  _vidf_error "You must source this script in order to use it."
   exit 1
 fi
 
