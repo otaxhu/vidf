@@ -353,6 +353,21 @@ _vidf_style_cyan()
   [ "$_VIDF_COLOR" = "1" ] && printf "\033[1;36m"
 }
 
+_vidf_style_unbold()
+{
+  [ "$_VIDF_COLOR" = "1" ] && printf "\033[22m"
+}
+
+_vidf_style_ununderline()
+{
+  [ "$_VIDF_COLOR" = "1" ] && printf "\033[24m"
+}
+
+_vidf_style_uncolor()
+{
+  [ "$_VIDF_COLOR" = "1" ] && printf "\033[39m"
+}
+
 # }}}
 
 # Rendering help message logic. {{{
@@ -388,11 +403,11 @@ _vidf_help_render()
 vidf - Version Manager for ESP-IDF ($(vidf --version))
 
 USAGE
-    vidf <command> [options] [--] [arguments]
+    vidf <command> [options ...] [--] [arguments ...]
 
 COMMANDS
-    self-update [$(_vidf_style_underline)version$(_vidf_style_reset)]
-        Updates vidf to the latest release. If a specific $(_vidf_style_underline)version$(_vidf_style_reset)
+    self-update [$(_vidf_style_underline)version$(_vidf_style_ununderline)]
+        Updates vidf to the latest release. If a specific $(_vidf_style_underline)version$(_vidf_style_ununderline)
         is provided, that version will be installed instead.
 
         Options:
