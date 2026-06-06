@@ -548,25 +548,25 @@ vidf()
       fi
       if ! [ -e "$(_vidf_app_dir)/vidf" ]
       then
-        # Offer VIDF installation to the user.
+        # Offer vidf installation to the user.
 
         # Print short GPL notice
-        _vidf_err "Welcome to VIDF (Version Manager for ESP-IDF)"
+        _vidf_err "Welcome to vidf (Version Manager for ESP-IDF)"
         _vidf_err "Copyright (C) 2026 Oscar Pernia"
         _vidf_err "This program comes with ABSOLUTELY NO WARRANTY."
         _vidf_err "This is free software, and you are welcome to redistribute it"
         _vidf_err "under certain conditions."
         _vidf_err ""
 
-        if ! _vidf_user_confirms \
-          "Do you wish to install VIDF on \`$(_vidf_app_dir)\`?" \
-          "Operation cancelled. If you wish to choose another directory for the installation, please set \`VIDF_DIR\` variable."
+        _vidf_err "vidf is going to be installed on \`$(_vidf_app_dir)\`."
+        _vidf_err "If you wish to choose another directory for the installation, please cancel, set \`VIDF_DIR\` variable and try again."
+        if ! _vidf_user_confirms
         then
           return 1
         fi
       fi
 
-      # TODO: All of the VIDF repository cloning logic
+      # TODO: All of the vidf repository cloning logic
       if _vidf_has git
       then
         :
@@ -577,7 +577,7 @@ vidf()
       then
         :
       else
-        _vidf_err "Needs one of \`git\`, \`curl\` or \`wget\` in order to install VIDF."
+        _vidf_err "Needs one of \`git\`, \`curl\` or \`wget\` in order to install vidf."
         return 1
       fi
 
