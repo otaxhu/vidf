@@ -108,4 +108,33 @@ _vidf_check_args "$_TEST_CHECK_ARGS_FORMAT" --foo -f --bar bar-arg -b b-arg "$@"
 eval "$_EVAL_EXPECTED_SUCCESS"
 set --
 
+# - _vidf_canonize_args_eval
+
+_TEST_CANON_ARGS_FORMAT="--foo,-f,--bar:,-b:"
+
+# TODO: Check returned eval args are correct.
+
+# Success (already canon)
+_CANON_ARGS="$(_vidf_canonize_args_eval "$_TEST_CANON_ARGS_FORMAT" --foo -f --bar bar-arg -b b-arg)"
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# Success (non-canon)
+_CANON_ARGS="$(_vidf_canonize_args_eval "$_TEST_CANON_ARGS_FORMAT" --foo -fb b-arg --bar=bar-arg)"
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# Success, with arguments.
+#
+# This function doesn't check if the arguments are expected by caller, it just
+# canonize everything.
+_CANON_ARGS="$(_vidf_canonize_args_eval "$_TEST_CANON_ARGS_FORMAT" --foo -f --bar bar-arg -b b-arg some-args other-one)"
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# Missing option, success is expected because they are always optional.
+_CANON_ARGS="$(_vidf_canonize_args_eval "$_TEST_CANON_ARGS_FORMAT" -f --bar bar-arg -b b-arg)"
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# Missing value for option
+_CANON_ARGS="$(_vidf_canonize_args_eval "$_TEST_CANON_ARGS_FORMAT" --foo -f --bar bar-arg -b)" # Missing value on -b
+eval "$_EVAL_EXPECTED_FAILURE"
+
 exit 0

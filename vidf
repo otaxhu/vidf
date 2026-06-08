@@ -154,6 +154,61 @@ _vidf_sanitize_arg()
   printf "'%s'" "$sanitized"
 }
 
+# Canonizes flags, converts them from the form:
+#
+#   --foo=bar -abc
+#
+# To:
+#
+#   --foo 'bar' -a -b -c
+#
+# The output of this function is safe to be passed to `eval` command.
+#
+# The $1 format is similar to the one on _vidf_check_args, except that you must
+# trim the arguments range from the beginning, e.g:
+#
+# "-y,--prefix:,-h,--help"
+_vidf_canonize_args_eval()
+{
+  local flags
+  flags="${1:+"$1,"}"
+  shift
+
+  local short_opts
+  local long_opts
+
+  local remaining_flags
+  remaining_flags="$flags"
+
+  local cur_flag
+
+  while [ -n "$remaining_flags" ]
+  do
+    cur_flag="${remaining_flags%%,*}"
+    remaining_flags="${remaining_flags#*,}"
+
+    local has_arg
+    [ "$cur_flag" != "${cur_flag%:}" ] && has_arg=":"
+    cur_flag="${cur_flag%:}"
+
+    if [ "${cur_flag#--}" != "$cur_flag" ]
+    then
+      long_opts="${long_opts:+"$long_opts,"}${cur_flag#--}$has_arg"
+    else
+      short_opts="$short_opts${cur_flag#-}$has_arg"
+    fi
+  done
+
+  local exit_code_getopt
+  local parsed_args
+  parsed_args="$(getopt -q -o "$short_opts" -l "$long_opts" -- "$@")"
+  exit_code_getopt="$?"
+
+  printf "set -- %s\n" "$parsed_args"
+
+  return "$exit_code_getopt"
+}
+
 # NOTE: We don't use getopts because it doesn't accept long options
 #
 # The $1 format parameter is similar to getopts format, except that
@@ -161,6 +216,8 @@ _vidf_sanitize_arg()
 # arguments, followed by a comma-separated list of valid short and long
 # options. You can also pass a plus sign (+) after the minimum required
 # positional arguments to indicate the user can pass infinite arguments.
+#
+# User arguments must be canonized with _vidf_canonize_args_eval function.
 #
 # Basic format:
 # "2,-y,--prefix:,--version"
@@ -273,7 +330,7 @@ _vidf_check_args()
 # any flags, then you MUST NOT pass this argument, not even an empty string,
 # you must directly pass the user's $@ list after $1.
 #
-# - $@: User's arguments.
+# - $@: User's arguments, may be non-canonized.
 _vidf_parse_args_eval()
 {
   local format
@@ -283,6 +340,13 @@ _vidf_parse_args_eval()
   local flag_vars
   [ -n "${format#*,}" ] && flag_vars="$1" && shift
 
+  local canon_eval
+  if canon_eval="$(_vidf_canonize_args_eval "$format" "$@")"
+  then
+    eval "$canon_eval"
+  fi
+
+  # If failed to canonize, we check that here and return early.
   if ! _vidf_check_args "$format" "$@"
   then
     _vidf_echo "false"
