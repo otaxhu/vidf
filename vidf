@@ -144,6 +144,16 @@ _vidf_app_dir()
   printf "%s" "${VIDF_DIR:-"$HOME/.vidf"}"
 }
 
+# Output is already quoted.
+_vidf_sanitize_arg()
+{
+  local sanitized
+
+  sanitized="$(printf "%s" "$1" | sed "s/'/'\\\\''/")"
+
+  printf "'%s'" "$sanitized"
+}
+
 # NOTE: We don't use getopts because it doesn't accept long options
 #
 # The $1 format parameter is similar to getopts format, except that
@@ -287,7 +297,6 @@ _vidf_parse_args_eval()
   flag_vars="$(printf "%s" "$flag_vars" | sed 's/,/\n/g')"
 
   local set_args_eval
-  local sanitized_arg
   while [ "$#" -gt 0 ]
   do
     case "$1" in
@@ -295,8 +304,7 @@ _vidf_parse_args_eval()
         shift
         while [ "$#" -gt 0 ]
         do
-          sanitized_arg="$(printf "%s" "$1" | sed 's/"/\\"/g')"
-          set_args_eval="$set_args_eval \"$sanitized_arg\""
+          set_args_eval="$set_args_eval $(_vidf_sanitize_arg "$1")"
           shift
         done
         break
@@ -320,15 +328,13 @@ _vidf_parse_args_eval()
 
         if [ "$has_value" = 1 ]
         then
-          sanitized_arg="$(printf "%s" "$1" | sed 's/"/\\"/g')"
-          printf "%s\n" "$target_var=\"$sanitized_arg\""
+          printf "%s\n" "$target_var=$(_vidf_sanitize_arg "$1")"
         else
           printf "%s\n" "$target_var=1"
         fi
         ;;
       *)
-        sanitized_arg="$(printf "%s" "$1" | sed 's/"/\\"/g')"
-        set_args_eval="$set_args_eval \"$sanitized_arg\""
+        set_args_eval="$set_args_eval $(_vidf_sanitize_arg "$1")"
         ;;
     esac
     shift
