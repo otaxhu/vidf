@@ -162,13 +162,11 @@ _vidf_sanitize_arg()
 #
 #   --foo 'bar' -a -b -c
 #
-# The output of this function is safe to be passed to `eval` command.
-#
 # The $1 format is similar to the one on _vidf_check_args, except that you must
 # trim the arguments range from the beginning, e.g:
 #
 # "-y,--prefix:,-h,--help"
-_vidf_canonize_args_eval()
+_vidf_canonize_args()
 {
   local flags
   flags="${1:+"$1,"}"
@@ -181,13 +179,13 @@ _vidf_canonize_args_eval()
   remaining_flags="$flags"
 
   local cur_flag
+  local has_arg
 
   while [ -n "$remaining_flags" ]
   do
     cur_flag="${remaining_flags%%,*}"
     remaining_flags="${remaining_flags#*,}"
 
-    local has_arg
     [ "$cur_flag" != "${cur_flag%:}" ] && has_arg=":"
     cur_flag="${cur_flag%:}"
 
@@ -199,14 +197,38 @@ _vidf_canonize_args_eval()
     fi
   done
 
-  local exit_code_getopt
-  local parsed_args
-  parsed_args="$(getopt -q -o "$short_opts" -l "$long_opts" -- "$@")"
-  exit_code_getopt="$?"
+  local temp_err
+  temp_err="$(mktemp)"
 
+  local getopt_exit_code
+  getopt -o "$short_opts" -l "$long_opts" -- "$@" 2>"$temp_err"
+  getopt_exit_code="$?"
+
+  if [ "$getopt_exit_code" -ne 0 ]
+  then
+    _vidf_error "$(sed -E 's/^getopt:\s*(.)/\u\1/' "$temp_err")"
+  fi
+
+  rm -rf "$temp_err"
+  return "$getopt_exit_code"
+}
+
+# Same as _vidf_canonize_args, but the output of this function is safe to be
+# passed to `eval` command in order to set the canonized arguments.
+_vidf_canonize_args_eval()
+{
+  local flags
+  flags="${1:+"$1,"}"
+  shift
+
+  local parsed_args
+  local exit_code
+
+  parsed_args="$(_vidf_canonize_args "$flags" "$@")"
+  exit_code="$?"
   printf "set -- %s\n" "$parsed_args"
 
-  return "$exit_code_getopt"
+  return "$exit_code"
 }
 
 # NOTE: We don't use getopts because it doesn't accept long options
@@ -330,7 +352,7 @@ _vidf_check_args()
 # any flags, then you MUST NOT pass this argument, not even an empty string,
 # you must directly pass the user's $@ list after $1.
 #
-# - $@: User's arguments, may be non-canonized.
+# - $@: User's arguments, must be canonized.
 _vidf_parse_args_eval()
 {
   local format
@@ -340,13 +362,6 @@ _vidf_parse_args_eval()
   local flag_vars
   [ -n "${format#*,}" ] && flag_vars="$1" && shift
 
-  local canon_eval
-  if canon_eval="$(_vidf_canonize_args_eval "$format" "$@")"
-  then
-    eval "$canon_eval"
-  fi
-
-  # If failed to canonize, we check that here and return early.
   if ! _vidf_check_args "$format" "$@"
   then
     _vidf_echo "false"
@@ -405,6 +420,99 @@ _vidf_parse_args_eval()
   done
 
   printf "set --%s\n" " $set_args_eval"
+}
+
+# Returns the first argument that is not an option nor its value.
+#
+# $@ - User's arguments, this are required to be non-canonized due to the fact
+#      that the subcommand is treated as a regular positional argument.
+_vidf_find_subcommand()
+{
+  local skip_arg
+  skip_arg=0
+  local i
+
+  for i in "$@"
+  do
+    if [ "$skip_arg" = 1 ]
+    then
+      skip_arg=0
+      continue
+    fi
+
+    case "$i" in
+      --color)
+        # Add to pattern above known global options on canonical form that
+        # contains a value.
+        skip_arg=1
+        ;;
+      -*)
+        ;;
+      *)
+        subcommand="$i"
+        [ -z "$subcommand" ] && return 1
+        continue
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+# Removes the first argument that is not an option nor its value and return
+# everything else as an space separated list.
+#
+# $@ - User's arguments, this are required to be non-canonized due to the fact
+#      that the subcommand is treated as a regular positional argument.
+_vidf_filter_subcommand()
+{
+  local subcommand
+
+  if ! subcommand="$(_vidf_find_subcommand "$@")"
+  then
+    return 1
+  fi
+
+  local skip_arg
+  skip_arg=0
+  local i
+  for i in "$@"
+  do
+    if [ "$skip_arg" = 1 ]
+    then
+      skip_arg=0
+      printf " %s" "$(_vidf_sanitize_arg "$i")"
+      continue
+    fi
+
+    case "$i" in
+      --color)
+        skip_arg=1
+        printf " %s" "$(_vidf_sanitize_arg "$i")"
+        ;;
+      *)
+        [ "$i" = "$subcommand" ] && continue
+        printf " %s" "$(_vidf_sanitize_arg "$i")"
+        ;;
+    esac
+  done
+
+  _vidf_echo ""
+}
+
+# See _vidf_filter_subcommand, outputs a program to be eval'd by the caller,
+# which is going to filter out the subcommand from user's arguments.
+# You must have already called _vidf_find_subcommand in order to get the subcommand
+# before eval'ing this function's output.
+_vidf_filter_subcommand_eval()
+{
+  local filtered
+  if ! filtered="$(_vidf_filter_subcommand "$@")"
+  then
+    return 1
+  fi
+
+  printf "set -- %s" "$filtered"
 }
 
 # ANSI color styles logic. {{{
@@ -594,24 +702,70 @@ vidf()
   # First setup based on tty detection.
   _vidf_style_setup
 
-  # Check all arguments and handle the global options, as well
-  # as handling the -- delimiter. We filter and handle all global options
-  # from the final arguments, -- is not filtered because subcommands are
-  # supposed to handle it.
+  # {{{
+  # Extract and filter out subcommand, canonize user's arguments, filter and
+  # handle all global options from the canonized arguments.
+
+  # Find subcommand
+  local subcommand
+  subcommand="$(_vidf_find_subcommand "$@")"
+
+  # Filter out subcommand
+  eval "$(_vidf_filter_subcommand_eval "$@")"
+
+  local format
+  local global_format
+  global_format="--help,-h,--version,-v,--color:"
+  format="$global_format"
+
+  # Add here additional options for each subcommand, they must not conflict
+  # with the global options names.
+  case "$subcommand" in
+    self-update)
+      format="$format,-y"
+      ;;
+  esac
+
+  local canon_args_eval
+  if ! canon_args_eval="$(_vidf_canonize_args_eval "$format" "$@")"
+  then
+    return 1
+  fi
+
+  # Canonize the arguments.
+  eval "$canon_args_eval"
+
   local i
   local eoo # End Of Options, is -- present?
   eoo=0
   local flag_action
+
+  local invalid_value
+  invalid_value=0
+
+  local skip_arg
+  skip_arg=0
+
+  local err_msg
+
+  # Handle global options
   for i in "$@"
   do
-    # Do a circular shift filter, we don't use arrays because they are
-    # not available on POSIX shells.
+    # Circular shift filter, in order to remove global options.
     shift
+
+    if [ "$skip_arg" = 1 ]
+    then
+      skip_arg=0
+      continue
+    fi
+
     if [ "$eoo" = 1 ]
     then
       set -- "$@" "$i"
       continue
     fi
+
     case "$i" in
       --)
         eoo=1
@@ -621,10 +775,23 @@ vidf()
         flag_action=help
         ;;
       --color)
-        _vidf_style_setup 1
-        ;;
-      --no-color)
-        _vidf_style_setup 0
+        case "$1" in
+          always)
+            _vidf_style_setup 1
+            ;;
+          never)
+            _vidf_style_setup 0
+            ;;
+          auto)
+            _vidf_style_setup
+            ;;
+          *)
+            err_msg="$(printf "%s${err_msg:+"\n"}Invalid value for --color: '%s'" "$err_msg" "$1")"
+            invalid_value=1
+            ;;
+        esac
+
+        skip_arg=1
         ;;
       -v|--version)
         # Add here the flag actions that may have higher priority
@@ -643,6 +810,16 @@ vidf()
     esac
   done
 
+  # }}}
+  # End of canonization, at this point the we've handled global options.
+
+  if [ "$invalid_value" = 1 ]
+  then
+    _vidf_error "$err_msg"
+    _vidf_help_render >&2
+    return 1
+  fi
+
   case "$flag_action" in
     help)
       _vidf_help_render
@@ -654,21 +831,31 @@ vidf()
       ;;
   esac
 
-  if [ -z "${1:-}" ]
+  if [ -z "$subcommand" ]
   then
     _vidf_error "You must specify a subcommand."
     _vidf_help_render >&2
     return 1
   fi
 
-  local subcommand
-  subcommand="$1"
-  shift
+  # Trim leading global options from format string
+  format="${format#"$global_format,"}"
+  [ "$format" = "$global_format" ] && format=""
 
   case "$subcommand" in
     self-update)
+      if ! _vidf_has git
+      then
+        _vidf_error "$(_vidf_style_underline)git$(_vidf_style_ununderline) not found on PATH," \
+                    "this is a required dependency for the" \
+                    "$(_vidf_style_bold)self-update$(_vidf_style_unbold) subcommand."
+        return 1
+      fi
+
+      format="0-1,$format"
+
       local yes_flag
-      if ! eval "$(_vidf_parse_args_eval 0-1,-y yes_flag "$@")"
+      if ! eval "$(_vidf_parse_args_eval "$format" yes_flag "$@")"
       then
         return 1
       fi
