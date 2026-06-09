@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: main
+  pull_request:
+    branches: main
+
+jobs:
+  lint-and-format:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Beautysh
+        run: pip install beautysh
+
+      - name: Run ShellCheck Static Analysis
+        id: shellcheck_step
+        continue-on-error: true
+        run: |
+          echo "Checking scripts with ShellCheck..."
+          shellcheck -x vidf *.sh hooks/*
+
+      - name: Verify Code Formatting (Beautysh)
+        id: beautysh_step
+        continue-on-error: true
+        run: |
+          echo "Verifying code style consistency..."
+          beautysh --check -i 2 vidf *.sh hooks/*
+
+      - name: Check Assertions Status
+        run: |
+          if [ "${{ steps.shellcheck_step.outcome }}" = "failure" ] ||
+            [ "${{ steps.beautysh_step.outcome }}" = "failure" ]
+          then
+            echo "❌ Some QA assertions failed. Review the logs above for ShellCheck or Beautysh errors."
+            exit 1
+          fi
