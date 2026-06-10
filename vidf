@@ -713,21 +713,19 @@ vidf()
   # Filter out subcommand
   eval "$(_vidf_filter_subcommand_eval "$@")"
 
-  local format
   local global_format
   global_format="--help,-h,--version,-v,--color:"
-  format="$global_format"
 
   # Add here additional options for each subcommand, they must not conflict
   # with the global options names.
   case "$subcommand" in
     self-update)
-      format="$format,-y"
+      global_format="$global_format,-y"
       ;;
   esac
 
   local canon_args_eval
-  if ! canon_args_eval="$(_vidf_canonize_args_eval "$format" "$@")"
+  if ! canon_args_eval="$(_vidf_canonize_args_eval "$global_format" "$@")"
   then
     return 1
   fi
@@ -838,10 +836,6 @@ vidf()
     return 1
   fi
 
-  # Trim leading global options from format string
-  format="${format#"$global_format,"}"
-  [ "$format" = "$global_format" ] && format=""
-
   case "$subcommand" in
     self-update)
       if ! _vidf_has git
@@ -852,10 +846,8 @@ vidf()
         return 1
       fi
 
-      format="0-1,$format"
-
       local yes_flag
-      if ! eval "$(_vidf_parse_args_eval "$format" yes_flag "$@")"
+      if ! eval "$(_vidf_parse_args_eval 0-1,y yes_flag "$@")"
       then
         return 1
       fi
