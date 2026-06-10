@@ -654,8 +654,8 @@ OPTIONS
     -h, --help
         Shows this message.
 
-    --[no-]color
-        Enable or disable ANSI color output explicitly.
+    --color <$(_vidf_style_underline)WHEN$(_vidf_style_ununderline)>
+        Controls color output. Can be 'always', 'never', or 'auto' (default).
 
     -v, --version
         Prints currently installed vidf version and exits.
