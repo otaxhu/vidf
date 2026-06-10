@@ -95,10 +95,6 @@ _vidf_has()
 
 # You must pass to it at least 2 arguments, the predicate and the cancelled message.
 # A default value is provided for this two, so you can pass empty strings.
-#
-# Flags:
-#
-# -y: Automatically confirms
 _vidf_user_confirms()
 {
   local predicate
@@ -141,7 +137,24 @@ _vidf_user_confirms()
 
 _vidf_app_dir()
 {
-  printf "%s" "${VIDF_DIR:-"$HOME/.vidf"}"
+  local app_dir
+  app_dir="${VIDF_DIR:-"$HOME/.vidf"}"
+
+  if [ "$app_dir" = "${app_dir#/}" ]
+  then
+    if [ -n "${VIDF_DIR:-}" ]
+    then
+      _vidf_error "$(_vidf_style_underline)VIDF_DIR$(_vidf_style_ununderline)" \
+        "variable must be an absolute path."
+    else
+      _vidf_error "$(_vidf_style_underline)HOME$(_vidf_style_ununderline)" \
+        "variable must be an absolute path."
+    fi
+    return 1
+  fi
+
+  _vidf_echo "$app_dir"
+  return 0
 }
 
 # Output is already quoted.
