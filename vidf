@@ -192,21 +192,17 @@ _vidf_canonize_args()
   remaining_flags="$flags"
 
   local cur_flag
-  local has_arg
 
   while [ -n "$remaining_flags" ]
   do
     cur_flag="${remaining_flags%%,*}"
     remaining_flags="${remaining_flags#*,}"
 
-    [ "$cur_flag" != "${cur_flag%:}" ] && has_arg=":"
-    cur_flag="${cur_flag%:}"
-
     if [ "${cur_flag#--}" != "$cur_flag" ]
     then
-      long_opts="${long_opts:+"$long_opts,"}${cur_flag#--}$has_arg"
+      long_opts="${long_opts:+"$long_opts,"}${cur_flag#--}"
     else
-      short_opts="$short_opts${cur_flag#-}$has_arg"
+      short_opts="$short_opts${cur_flag#-}"
     fi
   done
 
@@ -214,11 +210,10 @@ _vidf_canonize_args()
   temp_err="$(mktemp)"
 
   local getopt_exit_code
-  getopt -o "$short_opts" -l "$long_opts" -- "$@" 2>"$temp_err"
-  getopt_exit_code="$?"
-
-  if [ "$getopt_exit_code" -ne 0 ]
+  getopt_exit_code=0
+  if ! getopt -o "$short_opts" -l "$long_opts" -- "$@" 2>"$temp_err"
   then
+    getopt_exit_code=1
     _vidf_error "$(sed -E 's/^getopt:\s*(.)/\u\1/' "$temp_err")"
   fi
 
@@ -231,17 +226,20 @@ _vidf_canonize_args()
 _vidf_canonize_args_eval()
 {
   local flags
-  flags="${1:+"$1,"}"
+  flags="$1"
   shift
 
   local parsed_args
-  local exit_code
 
-  parsed_args="$(_vidf_canonize_args "$flags" "$@")"
-  exit_code="$?"
+  if ! parsed_args="$(_vidf_canonize_args "$flags" "$@")"
+  then
+    _vidf_echo "false"
+    return 0
+  fi
+
   printf "set -- %s\n" "$parsed_args"
 
-  return "$exit_code"
+  return 0
 }
 
 # NOTE: We don't use getopts because it doesn't accept long options
@@ -737,14 +735,11 @@ vidf()
       ;;
   esac
 
-  local canon_args_eval
-  if ! canon_args_eval="$(_vidf_canonize_args_eval "$global_format" "$@")"
+  # Canonize the arguments.
+  if ! eval "$(_vidf_canonize_args_eval "$global_format" "$@")"
   then
     return 1
   fi
-
-  # Canonize the arguments.
-  eval "$canon_args_eval"
 
   local i
   local eoo # End Of Options, is -- present?
