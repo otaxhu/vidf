@@ -211,7 +211,7 @@ _vidf_canonize_args()
 
   local getopt_exit_code
   getopt_exit_code=0
-  if ! getopt -o "$short_opts" -l "$long_opts" -- "$@" 2>"$temp_err"
+  if ! LANGUAGE=C getopt -o "$short_opts" -l "$long_opts" -- "$@" 2>"$temp_err"
   then
     getopt_exit_code=1
     _vidf_error "$(sed -E 's/^getopt:\s*(.)/\u\1/' "$temp_err")"
