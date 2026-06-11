@@ -182,29 +182,49 @@ _vidf_sanitize_arg()
 _vidf_canonize_args()
 {
   local flags
-  flags="${1:+"$1,"}"
+  # Normalize flags, separate in newlines, apply colons to all aliases that
+  # end on colon (:), and finally one last separation with newlines of aliases.
+  # We don't use the slashes because this command is indifferent regarding aliases,
+  # aliases overwrite other aliases.
+  flags="$(_vidf_echo "$1" | awk '
+    BEGIN {
+      FS = ","
+
+      short_opts = ""
+      long_opts = ""
+    }
+    {
+      for (i = 1; i <= NF; i++)
+        {
+          alias_group = $i
+          has_colon = sub(/:$/, "", alias_group) > 0
+          n_aliases = split(alias_group, aliases, "/")
+          for (j = 1; j <= n_aliases; j++)
+            {
+              alias = aliases[j] (has_colon ? ":" : "")
+
+              if (sub(/^--/, "", alias))
+                {
+                  long_opts = (long_opts == "") ? alias : long_opts "," alias
+                }
+              else
+                {
+                  sub(/^-/, "", alias)
+                  short_opts = short_opts alias
+                }
+            }
+        }
+    }
+    END {
+      print short_opts, long_opts
+    }
+  ')"
   shift
 
   local short_opts
+  short_opts="${flags%" "*}"
   local long_opts
-
-  local remaining_flags
-  remaining_flags="$flags"
-
-  local cur_flag
-
-  while [ -n "$remaining_flags" ]
-  do
-    cur_flag="${remaining_flags%%,*}"
-    remaining_flags="${remaining_flags#*,}"
-
-    if [ "${cur_flag#--}" != "$cur_flag" ]
-    then
-      long_opts="${long_opts:+"$long_opts,"}${cur_flag#--}"
-    else
-      short_opts="$short_opts${cur_flag#-}"
-    fi
-  done
+  long_opts="${flags#*" "}"
 
   local temp_err
   temp_err="$(mktemp)"
@@ -249,6 +269,7 @@ _vidf_canonize_args_eval()
 # arguments, followed by a comma-separated list of valid short and long
 # options. You can also pass a plus sign (+) after the minimum required
 # positional arguments to indicate the user can pass infinite arguments.
+# You can also pass aliased flags, you can have multiple aliased flags.
 #
 # User arguments must be canonized with _vidf_canonize_args_eval function.
 #
@@ -260,6 +281,9 @@ _vidf_canonize_args_eval()
 #
 # Infinite arguments, minimum 1:
 # "1+,-y,--prefix:,--version"
+#
+# Aliased flags:
+# "2,-y/--yes,-p/--prefix:"
 _vidf_check_args()
 {
   local format
@@ -270,7 +294,10 @@ _vidf_check_args()
   expected_arg_range="${format%%,*}"
 
   local flags
-  [ -n "${format#*,}" ] && flags="${format#*,},"
+  flags="${format#*,}"
+
+  # Separate in newlines for better handling.
+  flags="$(_vidf_echo "$flags" | sed 's/,/\n/g')"
 
   local expected_min_args
   local expected_max_args
@@ -292,6 +319,8 @@ _vidf_check_args()
   local arg_count
   arg_count=0
 
+  local matched_flag
+
   while [ "$#" -gt 0 ]
   do
     case "$1" in
@@ -300,19 +329,25 @@ _vidf_check_args()
         arg_count="$((arg_count + $#))"
         break
         ;;
-      -*:)
-        # Edge case: User may pass literal "--foo:" as a flag, and the current code
-        # is going to treat it as a boolean option, rather than a valued option if
-        # the format string contains "--foo:,".
-        _vidf_error "Unexpected option \`$1\`."
-        return 1
-        ;;
       -*)
-        if [ "$flags" != "${flags#*"$1":,*}" ]
+        if _vidf_echo "$1" | grep -qE '[^-a-zA-Z0-9]'
+        then
+          # Contains invalid characters.
+          _vidf_error "Unrecognized option '$1'"
+          return 1
+        fi
+
+        if ! matched_flag="$(_vidf_echo "$flags" | grep -E "(^|/)$1(:|\$|/)")"
+        then
+          _vidf_error "Unrecognized option '$1'"
+          return 1
+        fi
+
+        if [ "$matched_flag" != "${matched_flag%:}" ]
         then
           if [ "$#" -lt 2 ]
           then
-            _vidf_error "Option \`$1\` requires an argument."
+            _vidf_error "Option '$1' requires an argument"
             return 1
           fi
 
@@ -320,14 +355,8 @@ _vidf_check_args()
           continue
         fi
 
-        if [ "$flags" != "${flags#*"$1",*}" ]
-        then
-          shift
-          continue
-        fi
-
-        _vidf_error "Unexpected option \`$1\`."
-        return 1
+        shift
+        continue
         ;;
       *)
         arg_count=$((arg_count + 1))
@@ -386,6 +415,10 @@ _vidf_parse_args_eval()
   expected_flags="$(printf "%s" "$expected_flags" | sed 's/,/\n/g')"
   flag_vars="$(printf "%s" "$flag_vars" | sed 's/,/\n/g')"
 
+  local matched_flag
+  local target_var
+  local flag_line_num
+
   local set_args_eval
   while [ "$#" -gt 0 ]
   do
@@ -400,27 +433,24 @@ _vidf_parse_args_eval()
         break
         ;;
       -*)
-        local target_var
-        local has_value
-        has_value=0
+        matched_flag="$(_vidf_echo "$expected_flags" | awk "
+          /(^|\\/)$1(:|\$|\\/)/ {
+            print NR, \$0
+            exit
+          }
+        ")"
 
-        local flag_line_num
-        flag_line_num="$(printf "%s" "$expected_flags" | grep -xnF -- "$1:" | cut -d: -f1)"
-        if [ -n "$flag_line_num" ]
+        flag_line_num="${matched_flag%%" "*}"
+        matched_flag="${matched_flag#*" "}"
+
+        target_var="$(_vidf_echo "$flag_vars" | sed -n "${flag_line_num}p")"
+
+        if [ "$matched_flag" != "${matched_flag#*:}" ]
         then
-          has_value=1
           shift
+          _vidf_echo "$target_var=$(_vidf_sanitize_arg "$1")"
         else
-          flag_line_num="$(printf "%s" "$expected_flags" | grep -xnF -- "$1" | cut -d: -f1)"
-        fi
-
-        target_var="$(printf "%s\n" "$flag_vars" | sed -n "${flag_line_num}p")"
-
-        if [ "$has_value" = 1 ]
-        then
-          printf "%s\n" "$target_var=$(_vidf_sanitize_arg "$1")"
-        else
-          printf "%s\n" "$target_var=1"
+          _vidf_echo "$target_var=1"
         fi
         ;;
       *)
