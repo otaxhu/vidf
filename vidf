@@ -891,7 +891,7 @@ vidf()
       fi
 
       local yes_flag
-      if ! eval "$(_vidf_parse_args_eval 0-1,y yes_flag "$@")"
+      if ! eval "$(_vidf_parse_args_eval 0-1,-y yes_flag "$@")"
       then
         return 1
       fi
