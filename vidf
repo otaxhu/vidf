@@ -329,14 +329,12 @@ _vidf_check_args()
         arg_count="$((arg_count + $#))"
         break
         ;;
+      -*[!-a-zA-Z0-9]*)
+        # Contains invalid characters.
+        _vidf_error "Unrecognized option '$1'"
+        return 1
+        ;;
       -*)
-        if _vidf_echo "$1" | grep -qE '[^-a-zA-Z0-9]'
-        then
-          # Contains invalid characters.
-          _vidf_error "Unrecognized option '$1'"
-          return 1
-        fi
-
         if ! matched_flag="$(_vidf_echo "$flags" | grep -E "(^|/)$1(:|\$|/)")"
         then
           _vidf_error "Unrecognized option '$1'"
