@@ -431,12 +431,12 @@ _vidf_parse_args_eval()
         break
         ;;
       -*)
-        matched_flag="$(_vidf_echo "$expected_flags" | awk "
-          /(^|\\/)$1(:|\$|\\/)/ {
-            print NR, \$0
+        matched_flag="$(_vidf_echo "$expected_flags" | awk '
+          /(^|\/)'"$1"'(:|$|\/)/ {
+            print NR, $0
             exit
           }
-        ")"
+        ')"
 
         flag_line_num="${matched_flag%%" "*}"
         matched_flag="${matched_flag#*" "}"
