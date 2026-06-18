@@ -488,6 +488,7 @@ _vidf_find_subcommand()
       -*)
         ;;
       *)
+        local subcommand
         subcommand="$i"
         [ -z "$subcommand" ] && return 1
         _vidf_echo "$subcommand"
@@ -499,26 +500,25 @@ _vidf_find_subcommand()
   return 1
 }
 
-# Removes the target subcommand and return everything else as an space
-# separated list.
-#
-# $1 - Target subcommand, must be the output of _vidf_find_subcommand.
+# Removes the subcommand and return everything else as an space separated list.
 #
 # $@ - User's arguments, this are required to be non-canonized due to the fact
 #      that the subcommand is treated as a regular positional argument.
 _vidf_filter_subcommand()
 {
-  local subcommand
-  subcommand="$1"
+  if [ "$#" -lt 1 ]
+  then
+    return 0
+  fi
 
-  [ -z "$subcommand" ] && return 1
-
+  local subcommand_found
+  subcommand_found=0
   local skip_arg
   skip_arg=0
   local i
   for i in "$@"
   do
-    if [ "$skip_arg" = 1 ]
+    if [ "$skip_arg" = 1 ] || [ "$subcommand_found" = 1 ]
     then
       skip_arg=0
       printf " %s" "$(_vidf_sanitize_arg "$i")"
@@ -530,9 +530,11 @@ _vidf_filter_subcommand()
         skip_arg=1
         printf " %s" "$(_vidf_sanitize_arg "$i")"
         ;;
-      *)
-        [ "$i" = "$subcommand" ] && continue
+      -*)
         printf " %s" "$(_vidf_sanitize_arg "$i")"
+        ;;
+      *)
+        subcommand_found=1
         ;;
     esac
   done
@@ -756,7 +758,7 @@ vidf()
   subcommand="$(_vidf_find_subcommand "$@")"
 
   # Filter out subcommand
-  eval "$(_vidf_filter_subcommand_eval "$subcommand" "$@")"
+  eval "$(_vidf_filter_subcommand_eval "$@")"
 
   local global_format
   global_format="--help,-h,--version,-v,--color:"

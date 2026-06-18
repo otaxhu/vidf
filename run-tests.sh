@@ -224,4 +224,53 @@ eval "$_EVAL_EXPECTED_FAILURE"
 
 exec >&3 3>&-
 
+# - _vidf_find_subcommand
+
+# Success
+_FOUND_SUBCOMMAND="$(_vidf_find_subcommand subcommand --foo foo-arg --bar bar-arg -f f-arg -b b-arg)"
+eval "$_EVAL_EXPECTED_SUCCESS"
+[ "$_FOUND_SUBCOMMAND" = "subcommand" ]
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# Success, multiple positional args
+_FOUND_SUBCOMMAND="$(_vidf_find_subcommand subcommand --foo foo-arg --bar bar-arg -f f-arg -b b-arg hello good bye)"
+eval "$_EVAL_EXPECTED_SUCCESS"
+[ "$_FOUND_SUBCOMMAND" = "subcommand" ]
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# Subcommand not found
+_FOUND_SUBCOMMAND="$(_vidf_find_subcommand --foo=foo-arg --bar=bar-arg -f=f-arg -b=b-arg)"
+eval "$_EVAL_EXPECTED_FAILURE"
+[ -z "$_FOUND_SUBCOMMAND" ]
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# Success, global options with value:
+_FOUND_SUBCOMMAND="$(_vidf_find_subcommand --color never subcommand --foo foo-arg --bar bar-arg -f f-arg -b b-arg)"
+eval "$_EVAL_EXPECTED_SUCCESS"
+[ "$_FOUND_SUBCOMMAND" = "subcommand" ]
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# - _vidf_filter_subcommand
+
+# Success
+_FILTERED_SUBCOMMAND="$(_vidf_filter_subcommand subcommand --foo foo-arg --bar bar-arg -f f-arg -b b-arg)"
+eval "$_EVAL_EXPECTED_SUCCESS"
+_vidf_echo "$_FILTERED_SUBCOMMAND" |
+grep -qE "^\s*'--foo'\s+'foo-arg'\s+'--bar'\s+'bar-arg'\s+'-f'\s+'f-arg'\s+'-b'\s+'b-arg'\s*$"
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# Success, multiple positional args
+_FILTERED_SUBCOMMAND="$(_vidf_filter_subcommand subcommand --foo foo-arg --bar bar-arg -f f-arg -b b-arg hello good bye)"
+eval "$_EVAL_EXPECTED_SUCCESS"
+_vidf_echo "$_FILTERED_SUBCOMMAND" |
+grep -qE "^\s*'--foo'\s+'foo-arg'\s+'--bar'\s+'bar-arg'\s+'-f'\s+'f-arg'\s+'-b'\s+'b-arg'\s+'hello'\s+'good'\s+'bye'\s*$"
+eval "$_EVAL_EXPECTED_SUCCESS"
+
+# Subcommand not found, success is expected and no argument should be filtered out
+_FILTERED_SUBCOMMAND="$(_vidf_filter_subcommand --foo=foo-arg --bar=bar-arg -f=f-arg -b=b-arg)"
+eval "$_EVAL_EXPECTED_SUCCESS"
+_vidf_echo "$_FILTERED_SUBCOMMAND" |
+grep -qE "^\s*'--foo=foo-arg'\s+'--bar=bar-arg'\s+'-f=f-arg'\s+'-b=b-arg'\s*$"
+eval "$_EVAL_EXPECTED_SUCCESS"
+
 exit 0
