@@ -945,6 +945,9 @@ vidf()
 
 if ! _vidf_is_sourced && [ "$_VIDF_TEST" != 1 ]
 then
+  # Initial setup for colors
+  vidf --help "$@" >/dev/null 2>&1
+
   if ! [ -e "$(_vidf_app_dir)" ]
   then
     # Assume the user is running the script for the first time and is
