@@ -862,6 +862,12 @@ vidf()
     return 1
   fi
 
+  # Early return, before handling flag actions
+  if [ "$_VIDF_STYLE_SETUP" = 1 ]
+  then
+    return 0
+  fi
+
   case "$flag_action" in
     help)
       _vidf_help_render
@@ -1050,7 +1056,7 @@ vidf()
 if ! _vidf_is_sourced && [ "$_VIDF_TEST" != 1 ]
 then
   # Initial setup for colors
-  vidf --help "$@" >/dev/null 2>&1
+  _VIDF_STYLE_SETUP=1 vidf "$@" || exit "$?"
 
   if ! [ -e "$(_vidf_app_dir)" ]
   then
