@@ -884,9 +884,10 @@ vidf()
     self-update)
       if ! _vidf_has git
       then
-        _vidf_error "$(_vidf_style_underline)git$(_vidf_style_ununderline) not found on PATH," \
-                    "this is a required dependency for the" \
-                    "$(_vidf_style_bold)self-update$(_vidf_style_unbold) subcommand."
+        _vidf_error "$(_vidf_style_bold)git$(_vidf_style_unbold) not found on" \
+          "$(_vidf_style_underline)PATH$(_vidf_style_ununderline)," \
+          "this is a required dependency for the" \
+          "$(_vidf_style_bold)self-update$(_vidf_style_unbold) subcommand."
         return 1
       fi
 
@@ -895,8 +896,48 @@ vidf()
       then
         return 1
       fi
-      if ! [ -e "$(_vidf_app_dir)/vidf" ]
+
+      local root_dir
+      if ! root_dir="$(_vidf_app_dir)"
       then
+        return 1
+      fi
+
+      # Where vidf is going to be cloned into.
+      local install_dir
+      install_dir="$root_dir/vidf"
+
+      # Decentralizing and supporting forks, while I solve the problem
+      # of distributing the tool through more secure package managers.
+      local repo_url
+      repo_url="${VIDF_SELF_UPDATE_GIT_URL:-"https://github.com/otaxhu/vidf"}"
+
+      local version_tag
+      version_tag="${1:-}"
+      if [ -z "$version_tag" ]
+      then
+        _vidf_info "Checking for the latest remote version..."
+        version_tag="$(
+          git ls-remote --tags --refs "$repo_url" | \
+          awk -F/ '{print $3}' | \
+          grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+' | \
+          sort -t . -k 1,1 -k 2,2 -k 3,3 -r | head -n1
+        )"
+        if [ -z "$version_tag" ]
+        then
+          _vidf_error "Couldn't determine the latest remote version. Try again."
+          return 1
+        fi
+        _vidf_info "Found latest version" \
+          "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)"
+      fi
+
+      local is_installing
+
+      if ! [ -d "$install_dir/.git" ]
+      then
+        is_installing=1
+
         # Offer vidf installation to the user.
 
         # Print short GPL notice
@@ -907,33 +948,96 @@ vidf()
         _vidf_err "under certain conditions."
         _vidf_err ""
 
-        _vidf_info "$(_vidf_style_bold)vidf$(_vidf_style_unbold) is going to be installed on" \
-                   "$(_vidf_style_bold)$(_vidf_app_dir)$(_vidf_style_unbold)"
-        _vidf_info "If you wish to choose another directory for the installation, please cancel, set" \
-                   "$(_vidf_style_underline)VIDF_DIR$(_vidf_style_ununderline)" \
-                   "variable and try again."
-        if ! _vidf_user_confirms
+        if [ "$yes_flag" != 1 ]
         then
-          return 1
+          _vidf_info "$(_vidf_style_bold)vidf ($version_tag)$(_vidf_style_unbold) is going to be installed on" \
+            "$(_vidf_style_bold)$root_dir$(_vidf_style_unbold)"
+          _vidf_info "If you wish to choose another directory for the installation, please cancel, set" \
+            "$(_vidf_style_underline)VIDF_DIR$(_vidf_style_ununderline)" \
+            "variable and try again."
+          _vidf_user_confirms || return 1
         fi
-      fi
 
-      # TODO: All of the vidf repository cloning logic
-      if _vidf_has git
-      then
-        :
-      elif _vidf_has curl
-      then
-        :
-      elif _vidf_has wget
-      then
-        :
+        _vidf_info "Installing $(_vidf_style_bold)vidf ($version_tag)$(_vidf_style_unbold)" \
+          "on $(_vidf_style_bold)$root_dir$(_vidf_style_unbold)..."
+
+        # Initialize repo
+
+        if ! mkdir -p "$install_dir"
+        then
+          _vidf_error "Failed to create directory" \
+            "$(_vidf_style_bold)$install_dir$(_vidf_style_unbold)"
+          return 2
+        fi
+
+        if ! git --git-dir="$install_dir/.git" init "$install_dir" -q
+        then
+          _vidf_error "Failed to initialize vidf git repository on" \
+            "$(_vidf_style_bold)$install_dir$(_vidf_style_unbold)"
+          return 2
+        fi
       else
-        _vidf_error "Needs one of \`git\`, \`curl\` or \`wget\` in order to install vidf."
-        return 1
+        is_installing=0
+
+        _vidf_info "Updating $(_vidf_style_bold)vidf$(_vidf_style_unbold) to version" \
+          "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)..."
       fi
 
-      # TODO: The rest of the logic for `self-update`-ing
+      if ! git --git-dir="$install_dir/.git" remote add origin "$repo_url" 2>/dev/null \
+        && ! git remote set-url origin "$repo_url"
+      then
+        _vidf_error "Failed to add/set git remote origin" \
+          "$(_vidf_style_bold)$repo_url$(_vidf_style_bold)"
+        return 2
+      fi
+
+      if ! git --git-dir="$install_dir/.git" --work-tree="$install_dir" \
+        fetch origin tag "$version_tag" --depth=1 2>/dev/null \
+        && ! git --git-dir="$install_dir/.git" --work-tree="$install_dir" \
+        fetch origin "$version_tag" --depth=1 2>/dev/null
+      then
+        _vidf_error "Failed to fetch vidf version" \
+          "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)"
+        return 2
+      fi
+
+      if ! git --git-dir="$install_dir/.git" --work-tree="$install_dir" \
+        switch -qdf FETCH_HEAD
+      then
+        _vidf_error "Failed to switch to vidf version" \
+          "$(_vidf_style_bold)$version_tag$(_vidf_style_bold)"
+        return 2
+      fi
+
+      # Clean up repository
+      git --git-dir="$install_dir/.git" --work-tree="$install_dir" \
+        -c gc.reflogExpire=now -c gc.reflogExpireUnreachable=now \
+        gc --aggressive --prune=now >/dev/null 2>&1
+
+      if [ "$is_installing" = 1 ]
+      then
+        _vidf_success "$(_vidf_style_bold)vidf$(_vidf_style_unbold) version" \
+          "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold) installed successfully"
+
+        _vidf_err ""
+        _vidf_err "$(_vidf_style_bold)Next steps to complete the installation:$(_vidf_style_unbold)"
+        _vidf_err "Add the $(_vidf_style_underline)VIDF_DIR$(_vidf_style_ununderline)" \
+          "directory and source the script by appending the following lines"
+        _vidf_err "to your shell profile script (e.g., ~/.bashrc, ~/.zshrc, or ~/.profile):"
+        _vidf_err "$(_vidf_style_bold)" # Command block start
+        if [ "$root_dir" = "$HOME/.vidf" ]
+        then
+          _vidf_err "  export VIDF_DIR=\"\$HOME/.vidf\""
+        else
+          _vidf_err "  export VIDF_DIR=$(_vidf_sanitize_arg "$root_dir")"
+        fi
+        _vidf_err "  . \"\$VIDF_DIR/vidf/vidf\""
+        _vidf_err "$(_vidf_style_unbold)" # Command block end
+        _vidf_err "After adding it, restart your terminal or run source command"
+      else
+        _vidf_success "$(_vidf_style_bold)vidf$(_vidf_style_unbold) updated to version" \
+          "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold) succesfully"
+      fi
       ;;
     *)
       _vidf_error "Unknown subcommand: $subcommand"
@@ -957,7 +1061,14 @@ then
     _vidf_info "No installation found. Running: $(_vidf_style_bold)vidf self-update $*"
 
     vidf self-update "$@"
-    exit "$?"
+    _EXIT_CODE="$?"
+    if [ "$_EXIT_CODE" != 0 ]
+    then
+      _vidf_error "Cleaning up failed installation..."
+      rm -rf "$(_vidf_app_dir)"
+    fi
+
+    exit "$_EXIT_CODE"
   fi
 
   _vidf_error "You must source this script in order to use it."
