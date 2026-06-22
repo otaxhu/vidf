@@ -551,6 +551,109 @@ _vidf_filter_subcommand_eval()
   printf "set -- %s" "$(_vidf_filter_subcommand "$@")"
 }
 
+# Git-related functions {{{
+
+# Helper functions:
+
+_vidf_git_base()
+{
+  local install_dir
+  install_dir="$1"
+  shift
+  git --git-dir="$install_dir/.git" "$@"
+}
+
+_vidf_git_wt()
+{
+  local install_dir
+  install_dir="$1"
+  shift
+  git --git-dir="$install_dir/.git" --work-tree="$install_dir" "$@"
+}
+
+# Initializes a git repository.
+_vidf_git_init()
+{
+  local install_dir
+  install_dir="$1"
+
+  if ! mkdir -p "$install_dir"
+  then
+    _vidf_error "Failed to create directory" \
+      "$(_vidf_style_bold)$install_dir$(_vidf_style_unbold)"
+    return 2
+  fi
+
+  if ! _vidf_git_base "$install_dir" init "$install_dir" -q
+  then
+    _vidf_error "Failed to initialize git repository on" \
+      "$(_vidf_style_bold)$install_dir$(_vidf_style_unbold)"
+    return 2
+  fi
+
+  return 0
+}
+
+# Fetches the version tag or branch, and switches the repository to use that version.
+#
+# This works for any repository, not only vidf's, e.g. ESP-IDF's.
+_vidf_git_switch()
+{
+  local install_dir
+  install_dir="$1"
+  local repo_url
+  repo_url="$2"
+  local version_tag
+  version_tag="$3"
+
+  if ! _vidf_git_base "$install_dir" remote add origin "$repo_url" 2>/dev/null \
+    && ! _vidf_git_base "$install_dir" remote set-url origin "$repo_url" 2>/dev/null
+  then
+    _vidf_error "Failed to add/set git remote origin" \
+      "$(_vidf_style_bold)$repo_url$(_vidf_style_bold)"
+    return 2
+  fi
+
+  if ! _vidf_git_wt "$install_dir" fetch origin tag "$version_tag" --depth=1 2>/dev/null \
+    && ! _vidf_git_wt "$install_dir" fetch origin "$version_tag" --depth=1 2>/dev/null
+  then
+    _vidf_error "Failed to git fetch version" \
+      "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)"
+    return 2
+  fi
+
+  if ! _vidf_git_wt "$install_dir" switch -qdf FETCH_HEAD
+  then
+    _vidf_error "Failed to git switch to version" \
+      "$(_vidf_style_bold)$version_tag$(_vidf_style_bold)"
+    return 2
+  fi
+
+  _vidf_git_base "$install_dir" -c gc.reflogExpire=now -c gc.reflogExpireUnreachable=now \
+    gc --aggressive --prune=now >/dev/null 2>&1
+
+  return 0
+}
+
+# Ensures git repository exists, fetches version tag or branch, and switches the repository
+# to use that version.
+#
+# Is a combination of `git init`, `git fetch` and `git switch` all-in-one.
+_vidf_git_ensure_switch()
+{
+  local install_dir
+  install_dir="$1"
+  local repo_url
+  repo_url="$2"
+  local version_tag
+  version_tag="$3"
+
+  _vidf_git_init "$install_dir"
+  _vidf_git_switch "$install_dir" "$repo_url" "$version_tag"
+}
+
+# }}}
+
 # ANSI color styles logic. {{{
 
 _VIDF_COLOR=1
@@ -965,22 +1068,6 @@ vidf()
 
         _vidf_info "Installing $(_vidf_style_bold)vidf ($version_tag)$(_vidf_style_unbold)" \
           "on $(_vidf_style_bold)$root_dir$(_vidf_style_unbold)..."
-
-        # Initialize repo
-
-        if ! mkdir -p "$install_dir"
-        then
-          _vidf_error "Failed to create directory" \
-            "$(_vidf_style_bold)$install_dir$(_vidf_style_unbold)"
-          return 2
-        fi
-
-        if ! git --git-dir="$install_dir/.git" init "$install_dir" -q
-        then
-          _vidf_error "Failed to initialize vidf git repository on" \
-            "$(_vidf_style_bold)$install_dir$(_vidf_style_unbold)"
-          return 2
-        fi
       else
         is_installing=0
 
@@ -988,36 +1075,7 @@ vidf()
           "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)..."
       fi
 
-      if ! git --git-dir="$install_dir/.git" remote add origin "$repo_url" 2>/dev/null \
-        && ! git remote set-url origin "$repo_url"
-      then
-        _vidf_error "Failed to add/set git remote origin" \
-          "$(_vidf_style_bold)$repo_url$(_vidf_style_bold)"
-        return 2
-      fi
-
-      if ! git --git-dir="$install_dir/.git" --work-tree="$install_dir" \
-        fetch origin tag "$version_tag" --depth=1 2>/dev/null \
-        && ! git --git-dir="$install_dir/.git" --work-tree="$install_dir" \
-        fetch origin "$version_tag" --depth=1 2>/dev/null
-      then
-        _vidf_error "Failed to fetch vidf version" \
-          "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)"
-        return 2
-      fi
-
-      if ! git --git-dir="$install_dir/.git" --work-tree="$install_dir" \
-        switch -qdf FETCH_HEAD
-      then
-        _vidf_error "Failed to switch to vidf version" \
-          "$(_vidf_style_bold)$version_tag$(_vidf_style_bold)"
-        return 2
-      fi
-
-      # Clean up repository
-      git --git-dir="$install_dir/.git" --work-tree="$install_dir" \
-        -c gc.reflogExpire=now -c gc.reflogExpireUnreachable=now \
-        gc --aggressive --prune=now >/dev/null 2>&1
+      _vidf_git_ensure_switch "$install_dir" "$repo_url" "$version_tag" || return
 
       if [ "$is_installing" = 1 ]
       then
