@@ -568,7 +568,18 @@ _vidf_git_wt()
   local install_dir
   install_dir="$1"
   shift
-  git --git-dir="$install_dir/.git" --work-tree="$install_dir" "$@"
+  if [ "$1" = "submodule" ]
+  then
+    # Old bug with git submodule, it dates back to 2018. See:
+    #
+    # https://stackoverflow.com/questions/48767595/
+    #
+    # You have to cd into the working directory, since git submodule doesn't
+    # respect --work-tree option
+    _vidf_git_base "$install_dir" --work-tree="$install_dir" -C "$install_dir" "$@"
+  else
+    _vidf_git_base "$install_dir" --work-tree="$install_dir" "$@"
+  fi
 }
 
 # Initializes a git repository.
@@ -594,7 +605,9 @@ _vidf_git_init()
   return 0
 }
 
-# Fetches the version tag or branch, and switches the repository to use that version.
+# Fetches the version tag or branch, switches the repository to use that version,
+# And updates any present submodules recursively. Additionally, it prunes the repository,
+# which is very useful for long-living installations, such as ESP-IDF.
 #
 # This works for any repository, not only vidf's, e.g. ESP-IDF's.
 _vidf_git_switch()
@@ -614,8 +627,20 @@ _vidf_git_switch()
     return 2
   fi
 
-  if ! _vidf_git_wt "$install_dir" fetch origin tag "$version_tag" --depth=1 2>/dev/null \
-    && ! _vidf_git_wt "$install_dir" fetch origin "$version_tag" --depth=1 2>/dev/null
+  # Fetch tag first
+  local temp_err
+  temp_err="$(mktemp)"
+
+  local git_exit_code
+  _vidf_git_wt "$install_dir" fetch origin tag "$version_tag" --depth=1 -j"$(nproc)" 2>"$temp_err"
+  git_exit_code="$?"
+
+  # Remove fatal lines from output, in order to not panic the user.
+  sed -E '/^fatal:/d' "$temp_err" >&2
+  rm -f "$temp_err"
+
+  if [ "$git_exit_code" -ne 0 ] \
+    && ! _vidf_git_wt "$install_dir" fetch origin "$version_tag" --depth=1 -j"$(nproc)"
   then
     _vidf_error "Failed to git fetch version" \
       "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)"
@@ -628,6 +653,14 @@ _vidf_git_switch()
       "$(_vidf_style_bold)$version_tag$(_vidf_style_bold)"
     return 2
   fi
+
+  if ! _vidf_git_wt "$install_dir" submodule update --init --recursive --depth=1 -f -j"$(nproc)"
+  then
+    _vidf_error "Failed to update the submodules"
+    return 2
+  fi
+
+  _vidf_info "Pruning git repository..."
 
   _vidf_git_base "$install_dir" -c gc.reflogExpire=now -c gc.reflogExpireUnreachable=now \
     gc --aggressive --prune=now >/dev/null 2>&1
