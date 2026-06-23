@@ -1112,6 +1112,34 @@ vidf()
       else
         is_installing=0
 
+        local cur_version
+        # Don't use `vidf --version`, since the format for git tags is different.z
+        if cur_version="$(_vidf_git_wt "$install_dir" describe --tags --exact-match --dirty 2>/dev/null)" \
+          || cur_version="$(_vidf_git_wt "$install_dir" describe --exact-match --dirty 2>/dev/null)"
+        then
+          if [ "$cur_version" != "${cur_version%"-dirty"}" ]
+          then
+            _vidf_warn "Detected modifications to vidf installation! If you continue you will lose those changes."
+          elif [ "$cur_version" = "$version_tag" ]
+          then
+            _vidf_success "$(_vidf_style_bold)vidf$(_vidf_style_unbold) is already updated to version" \
+              "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold). Nothing to do!"
+            return 0
+          fi
+        else
+          cur_version="unknown"
+          _vidf_warn "Couldn't determine the current vidf version using git. Attempting to update anyways"
+        fi
+
+        if [ "$yes_flag" != 1 ]
+        then
+          _vidf_info "$(_vidf_style_bold)vidf$(_vidf_style_unbold) is going to be updated to the following version:"
+          _vidf_info "$(_vidf_style_bold)$cur_version$(_vidf_style_unbold) (currently installed) ->" \
+            "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold) (new)"
+
+          _vidf_user_confirms || return 1
+        fi
+
         _vidf_info "Updating $(_vidf_style_bold)vidf$(_vidf_style_unbold) to version" \
           "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)..."
       fi
