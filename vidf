@@ -1071,6 +1071,14 @@ vidf()
         fi
         _vidf_info "Found latest version" \
           "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)"
+      else
+        # Check existance of tag or branch
+        if ! git ls-remote --exit-code --refs "$repo_url" \
+          "refs/tags/$version_tag" "refs/heads/$version_tag" >/dev/null 2>&1
+        then
+          _vidf_error "Version $(_vidf_style_bold)$version_tag$(_vidf_style_unbold) not found on remote"
+          return 1
+        fi
       fi
 
       local is_installing
