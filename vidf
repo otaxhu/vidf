@@ -1,5 +1,5 @@
 #!/bin/sh
-# shellcheck disable=SC3043
+# shellcheck disable=SC3043 disable=SC2016
 
 # vidf - Version Manager for ESP-IDF.
 #
@@ -654,11 +654,28 @@ _vidf_git_switch()
     return 2
   fi
 
-  if ! _vidf_git_wt "$install_dir" submodule update --init --recursive --depth=1 -f -j"$(nproc)"
+  if ! _vidf_git_wt "$install_dir" submodule update --init --recursive --depth=1 -j"$(nproc)"
   then
     _vidf_error "Failed to update the submodules"
     return 2
   fi
+
+  # Don't use `git submodule update --force` above, it's very slow on ESP-IDF project
+  # and big repos, use `git submodule foreach` optimization instead.
+  if ! _vidf_git_wt "$install_dir" submodule foreach --recursive -q '
+    desc="$(git describe --tags --dirty --always)" || exit 1
+    if ! printf "%s" "$desc" | grep -qE -- "-dirty$"
+    then
+      # Continue foreach
+      exit 0
+    fi
+    git switch -qdf "$sha1"
+  ' >/dev/null 2>&1
+  then
+    _vidf_error "Failed to dirty-repair the submodules"
+    return 2
+  fi
+
 
   _vidf_info "Pruning git repository..."
 
@@ -683,6 +700,33 @@ _vidf_git_ensure_switch()
 
   _vidf_git_init "$install_dir"
   _vidf_git_switch "$install_dir" "$repo_url" "$version_tag"
+}
+
+_vidf_git_remote_tag_exists()
+{
+  local repo_url
+  repo_url="$1"
+  local remote_target
+  remote_target="$2"
+
+  if git ls-remote --exit-code --refs "$repo_url" \
+    "refs/tags/$remote_target" "refs/heads/$remote_target" >/dev/null 2>&1
+  then
+    return 0
+  fi
+
+  return 1
+}
+
+_vidf_git_describe_dirty()
+{
+  local install_dir
+  install_dir="$1"
+
+  local cur_version
+
+  _vidf_git_wt "$install_dir" describe --tags --exact-match --dirty 2>/dev/null ||
+  _vidf_git_wt "$install_dir" describe --exact-match --dirty 2>/dev/null
 }
 
 # }}}
@@ -1072,9 +1116,7 @@ vidf()
         _vidf_info "Found latest version" \
           "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)"
       else
-        # Check existance of tag or branch
-        if ! git ls-remote --exit-code --refs "$repo_url" \
-          "refs/tags/$version_tag" "refs/heads/$version_tag" >/dev/null 2>&1
+        if ! _vidf_git_remote_tag_exists "$repo_url" "$version_tag"
         then
           _vidf_error "Version $(_vidf_style_bold)$version_tag$(_vidf_style_unbold) not found on remote"
           return 1
@@ -1114,8 +1156,7 @@ vidf()
 
         local cur_version
         # Don't use `vidf --version`, since the format for git tags is different.z
-        if cur_version="$(_vidf_git_wt "$install_dir" describe --tags --exact-match --dirty 2>/dev/null)" \
-          || cur_version="$(_vidf_git_wt "$install_dir" describe --exact-match --dirty 2>/dev/null)"
+        if cur_version="$(_vidf_git_describe_dirty "$install_dir")"
         then
           if [ "$cur_version" != "${cur_version%"-dirty"}" ]
           then
