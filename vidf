@@ -859,6 +859,11 @@ COMMANDS
             -y
                 Automatic yes to all prompts.
 
+            --repair
+                Repairs the $(_vidf_style_bold)ESP-IDF$(_vidf_style_unbold) installation if $(:
+                )it's $(_vidf_style_bold)dirty$(_vidf_style_unbold) (git detected modifications) $(:
+                )or $(_vidf_style_bold)corrupted$(_vidf_style_unbold).
+
 OPTIONS
     -h, --help
         Shows this message.
@@ -947,6 +952,9 @@ vidf()
   case "$subcommand" in
     self-update)
       global_format="$global_format,-y"
+      ;;
+    install)
+      global_format="$global_format,-y,--repair"
       ;;
   esac
 
@@ -1064,6 +1072,23 @@ vidf()
     _vidf_help_render >&2
     return 1
   fi
+
+  # Guard-clause for subcommands that require the app dir to be present.
+  case "$subcommand" in
+    self-update)
+      # self-update doesn't require app dir to be present, since it creates it.
+      ;;
+    install)
+      # Add to pattern above subcommands that require the app dir to be present
+      if ! [ -d "$(_vidf_app_dir)" ]
+      then
+        _vidf_error "$(_vidf_style_bold)vidf$(_vidf_style_unbold) installation not found."
+        _vidf_info "To install it, run: $(_vidf_style_bold)vidf self-update$(_vidf_style_unbold)"
+        _vidf_info "Or execute the installer directly: $(_vidf_style_bold)./vidf$(_vidf_style_unbold)"
+        return 1
+      fi
+      ;;
+  esac
 
   case "$subcommand" in
     self-update)
@@ -1211,6 +1236,140 @@ vidf()
         _vidf_success "$(_vidf_style_bold)vidf$(_vidf_style_unbold) updated to version" \
           "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold) succesfully"
       fi
+      ;;
+    install)
+      local missing_dep
+      missing_dep=0
+      if ! _vidf_has git
+      then
+        missing_dep=1
+        _vidf_error "$(_vidf_style_bold)git$(_vidf_style_unbold) not found on" \
+          "$(_vidf_style_underline)PATH$(_vidf_style_ununderline)," \
+          "this is a required dependency for the" \
+          "$(_vidf_style_bold)install$(_vidf_style_unbold) subcommand."
+      fi
+      if ! _vidf_has python \
+        && ! _vidf_has python3
+      then
+        missing_dep=1
+        _vidf_error "$(_vidf_style_bold)python$(_vidf_style_unbold) not found on" \
+          "$(_vidf_style_underline)PATH$(_vidf_style_ununderline)," \
+          "this is a required dependency for the" \
+          "$(_vidf_style_bold)install$(_vidf_style_unbold) subcommand."
+      fi
+      [ "$missing_dep" = 1 ] && return 1
+
+      local yes_flag
+      local repair_flag
+      if ! eval "$(_vidf_parse_args_eval 0-1,-y,--repair yes_flag,repair_flag "$@")"
+      then
+        return 1
+      fi
+
+      local root_dir
+      if ! root_dir="$(_vidf_app_dir)"
+      then
+        return 1
+      fi
+
+      local idf_versions_dir
+      idf_versions_dir="$root_dir/idf-versions"
+
+      local repo_url
+      repo_url="${VIDF_INSTALL_IDF_GIT_URL:-"https://github.com/espressif/esp-idf"}"
+
+      local idf_version_tag
+      idf_version_tag="$1"
+      if [ -z "$idf_version_tag" ]
+      then
+        _vidf_info "Checking for the latest" \
+          "$(_vidf_style_bold)ESP-IDF$(_vidf_style_unbold)" \
+          "remote version..."
+        idf_version_tag="$(
+          git ls-remote --tags --refs "$repo_url" |
+          awk -F/ '{print $3}' |
+          # Weird version naming convention from ESP-IDF, they aren't following semver
+          grep -Ex 'v[0-9]+\.[0-9]+(\.[0-9]+)?' |
+          sort -t . -k 1,1 -k 2,2 -k 3,3 -r | head -n1
+        )"
+        if [ -z "$idf_version_tag" ]
+        then
+          _vidf_error "Couldn't determine the latest" \
+            "$(_vidf_style_bold)ESP-IDF$(_vidf_style_unbold)" \
+            "remote version. Try again."
+          return 1
+        fi
+        _vidf_info "Found latest remote version" \
+          "$(_vidf_style_bold)$idf_version_tag$(_vidf_style_unbold)"
+      else
+        if ! _vidf_git_remote_tag_exists "$repo_url" "$idf_version_tag"
+        then
+          _vidf_error "Version $(_vidf_style_bold)$idf_version_tag$(_vidf_style_unbold) not found on remote"
+          return 1
+        fi
+      fi
+
+      # Directory where ESP-IDF is going to be cloned into.
+      local install_dir
+      install_dir="$idf_versions_dir/$idf_version_tag"
+
+      if ! [ -d "$install_dir/.git" ]
+      then
+        # Disable repair_flag in order to show proper success message below.
+        repair_flag=0
+        if [ "$yes_flag" != 1 ]
+        then
+          _vidf_info "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
+            "is going to be installed."
+          _vidf_user_confirms || return
+        fi
+
+        _vidf_info "Installing $(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)..."
+      else
+        local cur_version
+        if cur_version="$(_vidf_git_describe_dirty "$install_dir")"
+        then
+          if [ "$cur_version" != "${cur_version%"-dirty"}" ]
+          then
+            _vidf_warn "Detected modifications to" \
+              "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
+              "installation!"
+          elif [ "$cur_version" = "$idf_version_tag" ]
+          then
+            _vidf_success "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
+              "already installed. Nothing to do!"
+            return 0
+          fi
+        else
+          _vidf_warn "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
+            "installation corrupted."
+        fi
+        if [ "$repair_flag" != 1 ]
+        then
+          _vidf_info "Use $(_vidf_style_bold)--repair$(_vidf_style_unbold)" \
+            "in order to repair this version."
+          return 0
+        fi
+
+        _vidf_info "Repairing" \
+          "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)..."
+      fi
+
+      _vidf_git_ensure_switch "$install_dir" "$repo_url" "$idf_version_tag" || return
+      if [ "$repair_flag" = 1 ]
+      then
+        _vidf_success "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
+          "was succesfully repaired."
+      else
+        _vidf_success "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
+          "was succesfully installed."
+      fi
+
+      _vidf_err ""
+      _vidf_err "In order to activate your ESP-IDF environment, run:"
+      _vidf_err "$(_vidf_style_bold)" # Command start block
+      _vidf_err "  vidf use $(_vidf_sanitize_arg "$idf_version_tag")"
+      _vidf_err "$(_vidf_style_unbold)" # Command end block
       ;;
     *)
       _vidf_error "Unknown subcommand: $subcommand"
