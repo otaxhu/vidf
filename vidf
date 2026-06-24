@@ -814,7 +814,7 @@ _vidf_help_render()
   while IFS="" read -r line
   do
     case "$line" in
-      USAGE|COMMANDS|OPTIONS)
+      USAGE|COMMANDS|"GLOBAL OPTIONS")
         # Title sections styles
         printf "%s%s" "$(_vidf_style_bold)" "$line"
         ;;
@@ -864,7 +864,7 @@ COMMANDS
                 )it's $(_vidf_style_bold)dirty$(_vidf_style_unbold) (git detected modifications) $(:
                 )or $(_vidf_style_bold)corrupted$(_vidf_style_unbold).
 
-OPTIONS
+GLOBAL OPTIONS
     -h, --help
         Shows this message.
 
