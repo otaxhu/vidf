@@ -93,6 +93,14 @@ _vidf_has()
   return "$?"
 }
 
+_vidf_read_hex_bytes()
+{
+  dd bs="$1" count=1 2>/dev/null | od -An -t x1 | xargs
+}
+
+# {{{ Interactive function helpers
+# These functions require user interaction
+
 # You must pass to it at least 2 arguments, the predicate and the cancelled message.
 # A default value is provided for this two, so you can pass empty strings.
 _vidf_user_confirms()
@@ -134,6 +142,338 @@ _vidf_user_confirms()
   _vidf_error "$cancelled"
   return 1
 }
+
+# Must be run from subshell due to registering global traps
+_vidf_menu_setup()
+{
+  if ! [ -t 2 ]
+  then
+    return 2
+  fi
+
+  local old_stty_var
+  old_stty_var="$1"
+
+  eval "$old_stty_var=\"\$(stty -g)\""
+
+  # Recovery traps
+  # shellcheck disable=2064
+  trap "_vidf_menu_unsetup \"\$$old_stty_var\"; exit 1" INT TERM
+
+  # These are permanent settings, must go after adding the recovery traps
+  stty -icanon -echo min 1 time 0
+  printf "\033[?25l" >&2
+}
+
+_vidf_menu_unsetup()
+{
+  local old_stty
+  old_stty="$1"
+
+  stty "$old_stty"
+  printf '\033[?25h' >&2
+}
+
+_vidf_menu_down()
+{
+  printf "\033[%dE" "$1" >&2
+}
+
+_vidf_menu_up()
+{
+  printf "\033[%dF" "$1" >&2
+}
+
+_vidf_menu_right()
+{
+  printf "\033[%dC" "$1" >&2
+}
+
+_vidf_menu_left()
+{
+  printf "\033[%dD" "$1" >&2
+}
+
+_vidf_menu_first_render()
+{
+  # If you wish to render single selection menus, then pass empty prefix
+  local prefix_unselected
+  prefix_unselected="$1"
+  shift
+
+  local n_rows
+  n_rows="$#"
+
+  # Render first row as pointed
+  _vidf_err " $(_vidf_style_green; _vidf_style_bold)>$(_vidf_style_reset)" \
+    "${prefix_unselected:+"$prefix_unselected "}$1"
+  shift
+
+  local i
+  for i in "$@"
+  do
+    _vidf_err "   ${prefix_unselected:+"$prefix_unselected "}$i"
+  done
+
+  # Leave cursor on row 0, which is the current row
+  _vidf_menu_up "$n_rows"
+}
+
+_vidf_menu_render_single_selected()
+{
+  # Assume cursor is in column 1 of currently pointed row
+
+  # shellcheck disable=2059
+  printf " $(_vidf_style_bold; _vidf_style_green)\u2714$(_vidf_style_reset)\r" >&2
+}
+
+_vidf_menu_render_selected()
+{
+  # Assume cursor is in column 1 of currently pointed row
+
+  # Move to the right 3 positions (possible " > " padding)
+  _vidf_menu_right 3
+
+  # shellcheck disable=2059
+  printf "$(_vidf_style_bold)\uff3b$(_vidf_style_green)\u2714$(_vidf_style_uncolor)\uff3d$(_vidf_style_unbold)\r" >&2
+}
+
+_vidf_menu_render_unselected()
+{
+  # Assume cursor is in column 1 of currently pointed row
+
+  # Move cursor to the right 3 positions (possible " > " padding)
+  _vidf_menu_right 3
+
+  # shellcheck disable=2059
+  printf "$(_vidf_style_bold)\uff3b \uff3d$(_vidf_style_unbold)\r" >&2
+}
+
+_vidf_menu_unrender_pointer()
+{
+  # Assume cursor is in column 1 of currently pointed row
+
+  printf "  \r" >&2
+}
+
+# Consumes bytes from stdin, and handles up/down arrow keystrokes, anything else is
+# output to stdout.
+#
+# When it reaches EOF, it returns code 1
+_vidf_menu_navigate()
+{
+  local cur_row_var
+  cur_row_var="$1"
+
+  local n_rows
+  n_rows="$2"
+
+  local byte_var
+  byte_var="$3"
+
+  eval "$byte_var=\"\$(_vidf_read_hex_bytes 1)\""
+  case "$(eval "_vidf_echo \"\$$byte_var\"")" in
+    "1b")
+      ;;
+    "")
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  eval "$byte_var=\"\$(_vidf_read_hex_bytes 1)\""
+  case "$(eval "_vidf_echo \"\$$byte_var\"")" in
+    "5b")
+      ;;
+    "")
+      return 1
+      ;;
+    *)
+      eval "$byte_var=\"1b \$$byte_var\""
+      return 0
+      ;;
+  esac
+
+  eval "$byte_var=\"\$(_vidf_read_hex_bytes 1)\""
+  case "$(eval "_vidf_echo \"\$$byte_var\"")" in
+    "41" | "42")
+      ;;
+    "")
+      return 1
+      ;;
+    *)
+      eval "$byte_var=\"1b 5b \$$byte_var\""
+      return 0
+      ;;
+  esac
+
+  _vidf_menu_unrender_pointer
+
+  case "$(eval "_vidf_echo \"\$$byte_var\"")" in
+    "41")
+      if [ "$(eval "_vidf_echo \"\$$cur_row_var\"")" -gt 0 ]
+      then
+        eval "$cur_row_var=\"\$(($cur_row_var - 1))\""
+
+        _vidf_menu_up 1
+      else
+        # Wrap-around
+        eval "$cur_row_var=\"\$((n_rows - 1))\""
+        if [ "$n_rows" -gt 1 ]
+        then
+          _vidf_menu_down "$((n_rows - 1))"
+        fi
+      fi
+      ;;
+    "42")
+      if [ "$(eval "_vidf_echo \"\$$cur_row_var\"")" -lt "$((n_rows - 1))" ]
+      then
+        eval "$cur_row_var=\"\$(($cur_row_var + 1))\""
+        _vidf_menu_down 1
+      else
+        # Wrap-around
+        eval "$cur_row_var=0"
+
+        if [ "$n_rows" -gt 1 ]
+        then
+          _vidf_menu_up "$((n_rows - 1))"
+        fi
+      fi
+      ;;
+  esac
+
+  # Write " > " indicator onto new position
+  # shellcheck disable=2059
+  printf " $(_vidf_style_bold; _vidf_style_green)>$(_vidf_style_reset)\r" >&2
+  return 0
+}
+
+_vidf_user_single_select()
+(
+  # Using a subshell so `exit` inside traps safely returns from the function without killing the parent shell.
+
+  local old_stty
+  _vidf_menu_setup old_stty || return
+
+  local title
+  title="$1"
+  shift
+
+  _vidf_err "$(_vidf_style_bold)--- $title ---$(_vidf_style_unbold)"
+  _vidf_err "Use $(_vidf_style_bold)[Up/Down Arrows]$(_vidf_style_unbold) to navigate, and" \
+    "$(_vidf_style_bold)[Enter]$(_vidf_style_unbold) to confirm."
+
+  local cur_row
+  cur_row=0
+
+  local n_rows
+  n_rows="$#"
+
+  local byte
+
+  _vidf_menu_first_render "" "$@"
+
+  while true
+  do
+    if ! _vidf_menu_navigate cur_row "$n_rows" byte
+    then
+      _vidf_error "Unexpected EOF, Ctrl+D was pressed"
+      return 1
+    fi
+    case "$byte" in
+      "0a")
+        # Enter key pressed
+
+        _vidf_menu_render_single_selected
+        _vidf_menu_down "$((n_rows - cur_row))"
+        break
+        ;;
+    esac
+  done
+
+  _vidf_menu_unsetup "$old_stty"
+
+  _vidf_echo "$cur_row"
+
+  return 0
+)
+
+# Outputs to stdout
+_vidf_user_multi_select()
+(
+  # Using a subshell so `exit` inside traps safely returns from the function without killing the parent shell.
+
+  local old_stty
+  _vidf_menu_setup old_stty || return
+
+  local title
+  title="$1"
+  shift
+
+  local n_rows
+  n_rows="$#"
+  local cur_row
+  cur_row=0
+
+  local byte
+
+  local menu_state
+  # Array of objects, with keys "name" and "selected"
+  menu_state="$(jq -nc '$ARGS.positional | map({"name": ., "selected": false})' --args -- "$@")"
+
+  _vidf_err "$(_vidf_style_bold)--- $title ---$(_vidf_style_unbold)"
+  _vidf_err "Use $(_vidf_style_bold)[Up/Down Arrows]$(_vidf_style_unbold) to navigate," \
+    "$(_vidf_style_bold)[Space]$(_vidf_style_unbold) to toggle, and" \
+    "$(_vidf_style_bold)[Enter]$(_vidf_style_unbold) to confirm."
+
+  _vidf_menu_first_render "$(_vidf_style_bold)$(printf "\uff3b \uff3d")$(_vidf_style_unbold)" "$@"
+
+  while true
+  do
+    if ! _vidf_menu_navigate cur_row "$n_rows" byte
+    then
+      _vidf_error "Unexpected EOF, Ctrl+D was pressed"
+      return 1
+    fi
+    case "$byte" in
+      "20")
+        # Space key pressed
+
+        menu_state="$(_vidf_echo "$menu_state" | jq -c ".[$cur_row].selected |= not")"
+        if [ "$(_vidf_echo "$menu_state" | jq -r ".[$cur_row].selected")" = true ]
+        then
+          _vidf_menu_render_selected
+        else
+          _vidf_menu_render_unselected
+        fi
+        ;;
+      "0a")
+        # Enter key pressed
+
+        _vidf_menu_unrender_pointer
+        _vidf_menu_down "$((n_rows - cur_row))"
+        break
+        ;;
+    esac
+  done
+
+  _vidf_menu_unsetup "$old_stty"
+
+  local line
+  _vidf_echo "$menu_state" | jq -r '.[] | select(.selected) | .name' |
+  while IFS="" read -r line
+  do
+    printf " %s" "$(_vidf_sanitize_arg "$line")"
+  done
+
+  _vidf_echo ""
+
+  return 0
+)
+
+# }}}
 
 _vidf_app_dir()
 {
