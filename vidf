@@ -350,6 +350,7 @@ _vidf_menu_navigate()
   return 0
 }
 
+# Outputs to stdout the index of the argument that the user selected
 _vidf_user_single_select()
 (
   # Using a subshell so `exit` inside traps safely returns from the function without killing the parent shell.
@@ -400,7 +401,7 @@ _vidf_user_single_select()
   return 0
 )
 
-# Outputs to stdout
+# Outputs to stdout the selected options as an space-separated quoted list
 _vidf_user_multi_select()
 (
   # Using a subshell so `exit` inside traps safely returns from the function without killing the parent shell.
