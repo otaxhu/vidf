@@ -503,7 +503,7 @@ _vidf_sanitize_arg()
 {
   local sanitized
 
-  sanitized="$(printf "%s" "$1" | sed "s/'/'\\\\''/")"
+  sanitized="$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
 
   printf "'%s'" "$sanitized"
 }
