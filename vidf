@@ -498,6 +498,58 @@ _vidf_app_dir()
   return 0
 }
 
+_vidf_cache_dir()
+{
+  local cache_dir
+  cache_dir="$XDG_CACHE_HOME"
+  if [ "$cache_dir" = "${cache_dir#/}" ]
+  then
+    cache_dir="$HOME/.cache"
+  fi
+  cache_dir="$cache_dir/vidf"
+  _vidf_echo "$cache_dir"
+  return 0
+}
+
+# Downloads a file using curl, and saves it into the app cache directory,
+# it also saves a .etag file that stores the resource's ETag the server returned,
+# to be send in future requests to help with server-side caching.
+#
+# It outputs to stdout the downloaded file path
+_vidf_download_file()
+{
+  local url
+  url="$1"
+
+  local filepath
+  filepath="$(_vidf_cache_dir)"
+  if ! mkdir -p "$filepath"
+  then
+    _vidf_error "Couldn't create cache directory: $(_vidf_style_bold)$filepath$(_vidf_style_unbold)"
+    return 2
+  fi
+
+  local filename
+  filename="$(basename "$url")"
+
+  filepath="$filepath/$filename"
+
+  local etag_path
+  etag_path="$filepath.etag"
+
+  if ! curl -fSsLo "$filepath" --etag-save "$etag_path" --etag-compare "$etag_path" "$url"
+  then
+    _vidf_error "Failed to download $(_vidf_style_bold)$filename$(_vidf_style_unbold)." \
+      "Try again later."
+    return 2
+  fi
+
+  _vidf_echo "$filepath"
+  return 0
+}
+
+# Argument-handling functions {{{
+
 # Output is already quoted.
 _vidf_sanitize_arg()
 {
@@ -891,6 +943,8 @@ _vidf_filter_subcommand_eval()
 {
   printf "set -- %s" "$(_vidf_filter_subcommand "$@")"
 }
+
+# }}}
 
 # Git-related functions {{{
 
@@ -1598,11 +1652,28 @@ vidf()
           "this is a required dependency for the" \
           "$(_vidf_style_bold)install$(_vidf_style_unbold) subcommand."
       fi
+      if ! _vidf_has curl
+      then
+        missing_dep=1
+        _vidf_error "$(_vidf_style_bold)curl$(_vidf_style_unbold) not found on" \
+          "$(_vidf_style_underline)PATH$(_vidf_style_ununderline)," \
+          "this is a required dependency for the" \
+          "$(_vidf_style_bold)install$(_vidf_style_unbold) subcommand."
+      fi
+      if ! _vidf_has jq
+      then
+        missing_dep=1
+        _vidf_error "$(_vidf_style_bold)jq$(_vidf_style_unbold) not found on" \
+          "$(_vidf_style_underline)PATH$(_vidf_style_ununderline)," \
+          "this is a required dependency for the" \
+          "$(_vidf_style_bold)install$(_vidf_style_unbold) subcommand."
+      fi
       [ "$missing_dep" = 1 ] && return 1
 
       local yes_flag
       local repair_flag
-      if ! eval "$(_vidf_parse_args_eval 0-1,-y,--repair yes_flag,repair_flag "$@")"
+      local targets_flag
+      if ! eval "$(_vidf_parse_args_eval 0-1,-y,--repair,-t/--targets: yes_flag,repair_flag,targets_flag "$@")"
       then
         return 1
       fi
@@ -1612,6 +1683,9 @@ vidf()
       then
         return 1
       fi
+
+      local vidf_install_dir
+      vidf_install_dir="$root_dir/vidf"
 
       local idf_versions_dir
       idf_versions_dir="$root_dir/idf-versions"
@@ -1650,6 +1724,138 @@ vidf()
         fi
       fi
 
+      _vidf_info "Checking target board compatibility for" \
+        "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)..."
+
+      local idf_versions_json
+      if ! idf_versions_json="$(_vidf_download_file "https://dl.espressif.com/dl/esp-idf/idf_versions.json")"
+      then
+        _vidf_error "Couldn't determine available target boards"
+        return 2
+      fi
+
+      local is_original_json
+      ! jq -e 'type == "object"' "$idf_versions_json" >/dev/null
+      is_original_json="$?"
+
+      # Compact JSON and move results to cache dir, only if it's original JSON
+      #
+      # Findings:
+      #
+      # There is an issue with the original JSON file, there is duplicated "name"
+      # keys in "VERSIONS" array, as well as duplicated values in
+      # "supported_targets" array, we de-duplicate them.
+      #
+      # We don't support "pre_release"s and "latest" versions, since those doesn't
+      # exists as git tags in the git repository, filter them out as well.
+      if [ "$is_original_json" = 1 ]
+      then
+        local temp_json
+        temp_json="$(mktemp)"
+
+        local jq_exit_code
+        jq_exit_code=0
+
+        if ! jq -c '
+          .VERSIONS | unique_by(.name) |
+          map(
+            # Discards pre_releases, and latest versions
+            select(.pre_release or .name == "latest" | not) |
+            {
+              name: .name,
+              supported_targets: .supported_targets | unique
+            }
+          )
+        ' "$idf_versions_json" > "$temp_json"
+        then
+          jq_exit_code=1
+          _vidf_error "Couldn't compact $(_vidf_style_bold)idf_versions.json$(_vidf_style_unbold)." \
+            "Please file an issue!"
+        elif ! mv -f "$temp_json" "$idf_versions_json"
+        then
+          jq_exit_code=1
+          _vidf_error "Couldn't move compacted $(_vidf_style_bold)idf_versions.json$(_vidf_style_unbold)" \
+            "into cache directory"
+        fi
+
+        if [ "$jq_exit_code" != 0 ]
+        then
+          rm -f "$temp_json"
+          return 2
+        fi
+      fi
+
+      # JSON array of strings
+      local supported_targets
+      if ! supported_targets="$(
+        jq -c --arg tag "$idf_version_tag" '
+          .[] | select(.name == $tag) | .supported_targets
+        ' "$idf_versions_json"
+      )"
+      then
+        _vidf_error "Couldn't parse $(_vidf_style_bold)idf_versions.json$(_vidf_style_unbold)." \
+          "Please file an issue!"
+        return 2
+      fi
+
+      if [ -n "$targets_flag" ]
+      then
+        targets_flag="$(
+          _vidf_echo "$targets_flag" |
+          tr ',' '\n' |
+          while IFS="" read -r line
+          do
+            printf " %s" "$(_vidf_sanitize_arg "$line")"
+          done
+        )"
+
+        # Check that targets work on selected version tag
+        local unsupported_targets
+        if ! unsupported_targets="$(
+          _vidf_echo "$targets_flag" | xargs \
+            jq -rn --arg-json supported "$supported_targets" '
+              $ARGS.positional[] | select(. as $input | $supported | index($input) | not)
+            ' --args --
+        )"
+        then
+          _vidf_error "Couldn't determine incompatible target boards. Please file an issue!"
+          return 2
+        fi
+
+        if [ -n "$unsupported_targets" ]
+        then
+          _vidf_error "The following board targets specified in" \
+            "$(_vidf_style_bold)--targets$(_vidf_style_unbold) flag are unsupported for" \
+            "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold):" \
+            "$(_vidf_style_bold)$(_vidf_echo "$unsupported_targets" | tr "\n" " ")$(_vidf_style_unbold)"
+          return 1
+        fi
+      else
+        local supported_targets_sh
+        supported_targets_sh="$(
+          jq -rn --argjson supported "$supported_targets" '
+            $supported[]
+          ' |
+          while read -r line
+          do
+            printf " %s" "$(_vidf_sanitize_arg "$line")"
+          done
+        )"
+
+        # Ask user for which ESP boards he is targetting
+        if ! targets_flag="$(
+          eval "_vidf_user_multi_select \"Select ESP-IDF target boards to install\" $supported_targets_sh"
+        )"
+        then
+          return 1
+        fi
+        if [ -z "$targets_flag" ]
+        then
+          _vidf_error "You must select at least 1 target board"
+          return 1
+        fi
+      fi
+
       # Directory where ESP-IDF is going to be cloned into.
       local install_dir
       install_dir="$idf_versions_dir/$idf_version_tag"
@@ -1662,6 +1868,8 @@ vidf()
         then
           _vidf_info "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
             "is going to be installed."
+          _vidf_info "With the following target boards:" \
+            "$(_vidf_style_bold)$(_vidf_echo "$targets_flag" | xargs)$(_vidf_style_bold)"
           _vidf_user_confirms || return
         fi
 
@@ -1675,7 +1883,7 @@ vidf()
             _vidf_warn "Detected modifications to" \
               "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
               "installation!"
-          elif [ "$cur_version" = "$idf_version_tag" ]
+          elif [ "$cur_version" = "$idf_version_tag" ] && [ "$repair_flag" != 1 ]
           then
             _vidf_success "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
               "already installed. Nothing to do!"
@@ -1697,6 +1905,24 @@ vidf()
       fi
 
       _vidf_git_ensure_switch "$install_dir" "$repo_url" "$idf_version_tag" || return
+
+      _vidf_info "Applying patches to ESP-IDF..."
+      if ! git apply --no-index --directory="$install_dir" --quiet -R --check "$vidf_install_dir"/patches/esp-idf/*.patch
+      then
+        if ! git apply --no-index --directory="$install_dir" "$vidf_install_dir"/patches/esp-idf/*.patch
+        then
+          _vidf_error "Couldn't apply patches to ESP-IDF installation. Please file an issue!"
+          return 2
+        fi
+      fi
+
+      _vidf_info "Running $(_vidf_style_bold)install.sh$(_vidf_style_unbold)..."
+      if ! _vidf_echo "$targets_flag" | xargs sh -- "$install_dir/install.sh"
+      then
+        _vidf_error "$(_vidf_style_bold)install.sh$(_vidf_style_unbold) failed to run"
+        return 2
+      fi
+
       if [ "$repair_flag" = 1 ]
       then
         _vidf_success "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
