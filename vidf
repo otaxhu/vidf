@@ -1907,13 +1907,15 @@ vidf()
       _vidf_git_ensure_switch "$install_dir" "$repo_url" "$idf_version_tag" || return
 
       _vidf_info "Applying patches to ESP-IDF..."
-      if ! git apply --no-index --directory="$install_dir" --quiet -R --check "$vidf_install_dir"/patches/esp-idf/*.patch
+      if ! git -c core.fileMode=false \
+        apply --no-index --directory="$install_dir" --quiet -R --check --unsafe-paths \
+        "$vidf_install_dir"/patches/esp-idf/*.patch \
+        && ! git -c core.fileMode=false \
+          apply --no-index --directory="$install_dir" --unsafe-paths \
+          "$vidf_install_dir"/patches/esp-idf/*.patch
       then
-        if ! git apply --no-index --directory="$install_dir" "$vidf_install_dir"/patches/esp-idf/*.patch
-        then
-          _vidf_error "Couldn't apply patches to ESP-IDF installation. Please file an issue!"
-          return 2
-        fi
+        _vidf_error "Couldn't apply patches to ESP-IDF installation. Please file an issue!"
+        return 2
       fi
 
       _vidf_info "Running $(_vidf_style_bold)install.sh$(_vidf_style_unbold)..."
