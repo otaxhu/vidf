@@ -1798,6 +1798,41 @@ vidf()
         return 2
       fi
 
+      # Directory where ESP-IDF is going to be cloned into.
+      local install_dir
+      install_dir="$idf_versions_dir/$idf_version_tag"
+
+      if ! [ -d "$install_dir/.git" ]
+      then
+        # Disable repair_flag in order to show proper success message below.
+        repair_flag=0
+      else
+        local cur_version
+        if cur_version="$(_vidf_git_describe_dirty "$install_dir")"
+        then
+          if [ "$cur_version" != "${cur_version%"-dirty"}" ]
+          then
+            _vidf_warn "Detected modifications to" \
+              "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
+              "installation!"
+          elif [ "$cur_version" = "$idf_version_tag" ] && [ "$repair_flag" != 1 ]
+          then
+            _vidf_success "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
+              "already installed. Nothing to do!"
+            return 0
+          fi
+        else
+          _vidf_warn "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
+            "installation corrupted."
+        fi
+        if [ "$repair_flag" != 1 ]
+        then
+          _vidf_info "Use $(_vidf_style_bold)--repair$(_vidf_style_unbold)" \
+            "in order to repair this version."
+          return 0
+        fi
+      fi
+
       if [ -n "$targets_flag" ]
       then
         targets_flag="$(
@@ -1856,53 +1891,25 @@ vidf()
         fi
       fi
 
-      # Directory where ESP-IDF is going to be cloned into.
-      local install_dir
-      install_dir="$idf_versions_dir/$idf_version_tag"
-
-      if ! [ -d "$install_dir/.git" ]
+      if [ "$repair_flag" = 1 ]
       then
-        # Disable repair_flag in order to show proper success message below.
-        repair_flag=0
+        _vidf_info "Repairing" \
+          "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)..."
+      else # Installing
         if [ "$yes_flag" != 1 ]
         then
           _vidf_info "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
             "is going to be installed."
           _vidf_info "With the following target boards:" \
-            "$(_vidf_style_bold)$(_vidf_echo "$targets_flag" | xargs)$(_vidf_style_bold)"
+            "$(_vidf_style_bold)$(_vidf_echo "$targets_flag" | xargs)$(_vidf_style_unbold)"
           _vidf_user_confirms || return
         fi
-
         _vidf_info "Installing $(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)..."
-      else
-        local cur_version
-        if cur_version="$(_vidf_git_describe_dirty "$install_dir")"
-        then
-          if [ "$cur_version" != "${cur_version%"-dirty"}" ]
-          then
-            _vidf_warn "Detected modifications to" \
-              "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
-              "installation!"
-          elif [ "$cur_version" = "$idf_version_tag" ] && [ "$repair_flag" != 1 ]
-          then
-            _vidf_success "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
-              "already installed. Nothing to do!"
-            return 0
-          fi
-        else
-          _vidf_warn "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)" \
-            "installation corrupted."
-        fi
-        if [ "$repair_flag" != 1 ]
-        then
-          _vidf_info "Use $(_vidf_style_bold)--repair$(_vidf_style_unbold)" \
-            "in order to repair this version."
-          return 0
-        fi
-
-        _vidf_info "Repairing" \
-          "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)..."
       fi
+
+      # From here downwards is the slow function calls.
+      #
+      # We've gathered all the information the user needs to give us, now he must wait.
 
       _vidf_git_ensure_switch "$install_dir" "$repo_url" "$idf_version_tag" || return
 
