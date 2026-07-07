@@ -1759,8 +1759,8 @@ vidf()
         if ! jq -c '
           .VERSIONS | unique_by(.name) |
           map(
-            # Discards pre_releases, and latest versions
-            select(.pre_release or .name == "latest" | not) |
+            # Discards pre_releases, latest versions and objects with empty supported_targets
+            select(.pre_release or .name == "latest" or (.supported_targets // [] | length == 0) | not) |
             {
               name: .name,
               supported_targets: .supported_targets | unique
