@@ -344,6 +344,8 @@ _vidf_menu_navigate()
       ;;
   esac
 
+  eval "$byte_var="
+
   # Write " > " indicator onto new position
   # shellcheck disable=2059
   printf " $(_vidf_style_bold; _vidf_style_green)>$(_vidf_style_reset)\r" >&2
@@ -426,10 +428,15 @@ _vidf_user_multi_select()
 
   _vidf_err "$(_vidf_style_bold)--- $title ---$(_vidf_style_unbold)"
   _vidf_err "Use $(_vidf_style_bold)[Up/Down Arrows]$(_vidf_style_unbold) to navigate," \
-    "$(_vidf_style_bold)[Space]$(_vidf_style_unbold) to toggle, and" \
+    "$(_vidf_style_bold)[A]$(_vidf_style_unbold) to toggle all," \
+    "$(_vidf_style_bold)[Space]$(_vidf_style_unbold) to toggle currently selected row, and" \
     "$(_vidf_style_bold)[Enter]$(_vidf_style_unbold) to confirm."
 
   _vidf_menu_first_render "$(_vidf_style_bold)$(printf "\uff3b \uff3d")$(_vidf_style_unbold)" "$@"
+
+  local original_row
+  local new_selected
+  local i
 
   while true
   do
@@ -456,6 +463,44 @@ _vidf_user_multi_select()
         _vidf_menu_unrender_pointer
         _vidf_menu_down "$((n_rows - cur_row))"
         break
+        ;;
+      "41"|"61")
+        # A key pressed
+
+        new_selected="$(_vidf_echo "$menu_state" | jq 'any(.selected == false)')"
+        menu_state="$(_vidf_echo "$menu_state" | jq -c ".[].selected = $new_selected")"
+
+        original_row="$cur_row"
+
+        if [ "$cur_row" -gt 0 ]
+        then
+          _vidf_menu_up "$cur_row"
+          cur_row=0
+        fi
+
+        i=0
+        while [ "$i" -lt "$n_rows" ]
+        do
+          if [ "$new_selected" = true ]
+          then
+            _vidf_menu_render_selected
+          else
+            _vidf_menu_render_unselected
+          fi
+
+          if [ "$i" -lt "$((n_rows - 1))" ]
+          then
+            _vidf_menu_down 1
+            cur_row="$((cur_row + 1))"
+          fi
+          i="$((i + 1))"
+        done
+
+        if [ "$cur_row" -gt "$original_row" ]
+        then
+          _vidf_menu_up "$((cur_row - original_row))"
+          cur_row="$original_row"
+        fi
         ;;
     esac
   done
