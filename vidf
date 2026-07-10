@@ -143,6 +143,11 @@ _vidf_user_confirms()
   return 1
 }
 
+_VIDF_MENU_CUR_ROW=
+_VIDF_MENU_N_ROWS=
+_VIDF_MENU_SAVED_STTY=
+_VIDF_MENU_CUR_BYTE_SEQ=
+
 # Must be run from subshell due to registering global traps
 _vidf_menu_setup()
 {
@@ -151,14 +156,23 @@ _vidf_menu_setup()
     return 2
   fi
 
-  local old_stty_var
-  old_stty_var="$1"
-
-  eval "$old_stty_var=\"\$(stty -g)\""
+  _VIDF_MENU_SAVED_STTY="$(stty -g)"
 
   # Recovery traps
-  # shellcheck disable=2064
-  trap "_vidf_menu_unsetup \"\$$old_stty_var\"; exit 1" INT TERM
+  # shellcheck disable=2064 disable=2154
+  trap "
+    if [ -n \"\$_VIDF_MENU_CUR_ROW\" ] && [ -n \"\$_VIDF_MENU_N_ROWS\" ]
+    then
+      remaining=\"\$((_VIDF_MENU_N_ROWS - _VIDF_MENU_CUR_ROW))\"
+      if [ \"\$remaining\" -gt 0 ]
+      then
+        _vidf_menu_down \"\$remaining\"
+      fi
+    fi
+    _vidf_menu_unsetup \"\$_VIDF_MENU_SAVED_STTY\"
+    _vidf_error 'Operation aborted.'
+    exit 1
+  " INT TERM
 
   # These are permanent settings, must go after adding the recovery traps
   stty -icanon -echo min 1 time 0
@@ -167,10 +181,7 @@ _vidf_menu_setup()
 
 _vidf_menu_unsetup()
 {
-  local old_stty
-  old_stty="$1"
-
-  stty "$old_stty"
+  stty "$_VIDF_MENU_SAVED_STTY"
   printf '\033[?25h' >&2
 }
 
@@ -262,17 +273,8 @@ _vidf_menu_unrender_pointer()
 # When it reaches EOF, it returns code 1
 _vidf_menu_navigate()
 {
-  local cur_row_var
-  cur_row_var="$1"
-
-  local n_rows
-  n_rows="$2"
-
-  local byte_var
-  byte_var="$3"
-
-  eval "$byte_var=\"\$(_vidf_read_hex_bytes 1)\""
-  case "$(eval "_vidf_echo \"\$$byte_var\"")" in
+  _VIDF_MENU_CUR_BYTE_SEQ="$(_vidf_read_hex_bytes 1)"
+  case "$_VIDF_MENU_CUR_BYTE_SEQ" in
     "1b")
       ;;
     "")
@@ -283,68 +285,68 @@ _vidf_menu_navigate()
       ;;
   esac
 
-  eval "$byte_var=\"\$(_vidf_read_hex_bytes 1)\""
-  case "$(eval "_vidf_echo \"\$$byte_var\"")" in
+  _VIDF_MENU_CUR_BYTE_SEQ="$(_vidf_read_hex_bytes 1)"
+  case "$_VIDF_MENU_CUR_BYTE_SEQ" in
     "5b")
       ;;
     "")
       return 1
       ;;
     *)
-      eval "$byte_var=\"1b \$$byte_var\""
+      _VIDF_MENU_CUR_BYTE_SEQ="1b $_VIDF_MENU_CUR_BYTE_SEQ"
       return 0
       ;;
   esac
 
-  eval "$byte_var=\"\$(_vidf_read_hex_bytes 1)\""
-  case "$(eval "_vidf_echo \"\$$byte_var\"")" in
+  _VIDF_MENU_CUR_BYTE_SEQ="$(_vidf_read_hex_bytes 1)"
+  case "$_VIDF_MENU_CUR_BYTE_SEQ" in
     "41" | "42")
       ;;
     "")
       return 1
       ;;
     *)
-      eval "$byte_var=\"1b 5b \$$byte_var\""
+      _VIDF_MENU_CUR_BYTE_SEQ="1b 5b $_VIDF_MENU_CUR_BYTE_SEQ"
       return 0
       ;;
   esac
 
   _vidf_menu_unrender_pointer
 
-  case "$(eval "_vidf_echo \"\$$byte_var\"")" in
+  case "$_VIDF_MENU_CUR_BYTE_SEQ" in
     "41")
-      if [ "$(eval "_vidf_echo \"\$$cur_row_var\"")" -gt 0 ]
+      if [ "$_VIDF_MENU_CUR_ROW" -gt 0 ]
       then
-        eval "$cur_row_var=\"\$(($cur_row_var - 1))\""
+        _VIDF_MENU_CUR_ROW="$((_VIDF_MENU_CUR_ROW - 1))"
 
         _vidf_menu_up 1
       else
         # Wrap-around
-        eval "$cur_row_var=\"\$((n_rows - 1))\""
-        if [ "$n_rows" -gt 1 ]
+        _VIDF_MENU_CUR_ROW="$((_VIDF_MENU_N_ROWS - 1))"
+        if [ "$_VIDF_MENU_N_ROWS" -gt 1 ]
         then
-          _vidf_menu_down "$((n_rows - 1))"
+          _vidf_menu_down "$((_VIDF_MENU_N_ROWS - 1))"
         fi
       fi
       ;;
     "42")
-      if [ "$(eval "_vidf_echo \"\$$cur_row_var\"")" -lt "$((n_rows - 1))" ]
+      if [ "$_VIDF_MENU_CUR_ROW" -lt "$((_VIDF_MENU_N_ROWS - 1))" ]
       then
-        eval "$cur_row_var=\"\$(($cur_row_var + 1))\""
+        _VIDF_MENU_CUR_ROW="$((_VIDF_MENU_CUR_ROW + 1))"
         _vidf_menu_down 1
       else
         # Wrap-around
-        eval "$cur_row_var=0"
+        _VIDF_MENU_CUR_ROW=0
 
-        if [ "$n_rows" -gt 1 ]
+        if [ "$_VIDF_MENU_N_ROWS" -gt 1 ]
         then
-          _vidf_menu_up "$((n_rows - 1))"
+          _vidf_menu_up "$((_VIDF_MENU_N_ROWS - 1))"
         fi
       fi
       ;;
   esac
 
-  eval "$byte_var="
+  _VIDF_MENU_CUR_BYTE_SEQ=
 
   # Write " > " indicator onto new position
   # shellcheck disable=2059
@@ -357,8 +359,7 @@ _vidf_user_single_select()
 (
   # Using a subshell so `exit` inside traps safely returns from the function without killing the parent shell.
 
-  local old_stty
-  _vidf_menu_setup old_stty || return
+  _vidf_menu_setup || return
 
   local title
   title="$1"
@@ -368,37 +369,32 @@ _vidf_user_single_select()
   _vidf_err "Use $(_vidf_style_bold)[Up/Down Arrows]$(_vidf_style_unbold) to navigate, and" \
     "$(_vidf_style_bold)[Enter]$(_vidf_style_unbold) to confirm."
 
-  local cur_row
-  cur_row=0
-
-  local n_rows
-  n_rows="$#"
-
-  local byte
+  _VIDF_MENU_N_ROWS="$#"
+  _VIDF_MENU_CUR_ROW=0
 
   _vidf_menu_first_render "" "$@"
 
   while true
   do
-    if ! _vidf_menu_navigate cur_row "$n_rows" byte
+    if ! _vidf_menu_navigate
     then
       _vidf_error "Unexpected EOF, Ctrl+D was pressed"
       return 1
     fi
-    case "$byte" in
+    case "$_VIDF_MENU_CUR_BYTE_SEQ" in
       "0a")
         # Enter key pressed
 
         _vidf_menu_render_single_selected
-        _vidf_menu_down "$((n_rows - cur_row))"
+        _vidf_menu_down "$((_VIDF_MENU_N_ROWS - _VIDF_MENU_CUR_ROW))"
         break
         ;;
     esac
   done
 
-  _vidf_menu_unsetup "$old_stty"
+  _vidf_menu_unsetup
 
-  _vidf_echo "$cur_row"
+  _vidf_echo "$_VIDF_MENU_CUR_ROW"
 
   return 0
 )
@@ -408,19 +404,14 @@ _vidf_user_multi_select()
 (
   # Using a subshell so `exit` inside traps safely returns from the function without killing the parent shell.
 
-  local old_stty
-  _vidf_menu_setup old_stty || return
+  _vidf_menu_setup || return
 
   local title
   title="$1"
   shift
 
-  local n_rows
-  n_rows="$#"
-  local cur_row
-  cur_row=0
-
-  local byte
+  _VIDF_MENU_N_ROWS="$#"
+  _VIDF_MENU_CUR_ROW=0
 
   local menu_state
   # Array of objects, with keys "name" and "selected"
@@ -440,17 +431,17 @@ _vidf_user_multi_select()
 
   while true
   do
-    if ! _vidf_menu_navigate cur_row "$n_rows" byte
+    if ! _vidf_menu_navigate
     then
       _vidf_error "Unexpected EOF, Ctrl+D was pressed"
       return 1
     fi
-    case "$byte" in
+    case "$_VIDF_MENU_CUR_BYTE_SEQ" in
       "20")
         # Space key pressed
 
-        menu_state="$(_vidf_echo "$menu_state" | jq -c ".[$cur_row].selected |= not")"
-        if [ "$(_vidf_echo "$menu_state" | jq -r ".[$cur_row].selected")" = true ]
+        menu_state="$(_vidf_echo "$menu_state" | jq -c ".[$_VIDF_MENU_CUR_ROW].selected |= not")"
+        if [ "$(_vidf_echo "$menu_state" | jq -r ".[$_VIDF_MENU_CUR_ROW].selected")" = true ]
         then
           _vidf_menu_render_selected
         else
@@ -461,7 +452,7 @@ _vidf_user_multi_select()
         # Enter key pressed
 
         _vidf_menu_unrender_pointer
-        _vidf_menu_down "$((n_rows - cur_row))"
+        _vidf_menu_down "$((_VIDF_MENU_N_ROWS - _VIDF_MENU_CUR_ROW))"
         break
         ;;
       "41"|"61")
@@ -470,16 +461,16 @@ _vidf_user_multi_select()
         new_selected="$(_vidf_echo "$menu_state" | jq 'any(.selected == false)')"
         menu_state="$(_vidf_echo "$menu_state" | jq -c ".[].selected = $new_selected")"
 
-        original_row="$cur_row"
+        original_row="$_VIDF_MENU_CUR_ROW"
 
-        if [ "$cur_row" -gt 0 ]
+        if [ "$_VIDF_MENU_CUR_ROW" -gt 0 ]
         then
-          _vidf_menu_up "$cur_row"
-          cur_row=0
+          _vidf_menu_up "$_VIDF_MENU_CUR_ROW"
+          _VIDF_MENU_CUR_ROW=0
         fi
 
         i=0
-        while [ "$i" -lt "$n_rows" ]
+        while [ "$i" -lt "$_VIDF_MENU_N_ROWS" ]
         do
           if [ "$new_selected" = true ]
           then
@@ -488,24 +479,24 @@ _vidf_user_multi_select()
             _vidf_menu_render_unselected
           fi
 
-          if [ "$i" -lt "$((n_rows - 1))" ]
+          if [ "$i" -lt "$((_VIDF_MENU_N_ROWS - 1))" ]
           then
             _vidf_menu_down 1
-            cur_row="$((cur_row + 1))"
+            _VIDF_MENU_CUR_ROW="$((_VIDF_MENU_CUR_ROW + 1))"
           fi
           i="$((i + 1))"
         done
 
-        if [ "$cur_row" -gt "$original_row" ]
+        if [ "$_VIDF_MENU_CUR_ROW" -gt "$original_row" ]
         then
-          _vidf_menu_up "$((cur_row - original_row))"
-          cur_row="$original_row"
+          _vidf_menu_up "$((_VIDF_MENU_CUR_ROW - original_row))"
+          _VIDF_MENU_CUR_ROW="$original_row"
         fi
         ;;
     esac
   done
 
-  _vidf_menu_unsetup "$old_stty"
+  _vidf_menu_unsetup
 
   local line
   _vidf_echo "$menu_state" | jq -r '.[] | select(.selected) | .name' |
