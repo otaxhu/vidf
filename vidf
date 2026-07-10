@@ -95,7 +95,7 @@ _vidf_has()
 
 _vidf_read_hex_bytes()
 {
-  dd bs="$1" count=1 2>/dev/null | od -An -t x1 | xargs
+  dd bs="$1" count=1 2>/dev/null | od -vAn -t x1 | xargs
 }
 
 # {{{ Interactive function helpers
