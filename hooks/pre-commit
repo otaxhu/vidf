@@ -34,21 +34,24 @@ then
 
   echo "Scripts are POSIX compliant (or mostly)!" >&2
 
-  if ! type beautysh >/dev/null 2>&1
-  then
-    echo "\`beautysh\` is not installed! You must use it in order to check the scripts are formatted correctly." >&2
-    echo "" >&2
-    echo "Try running this in order to install it: \`python3 -m pip install beautysh\`" >&2
-    exit 1
-  fi
-
-  if ! (printf "%s" "$staged_scripts" | xargs -d "\n" beautysh --check -i 2)
-  then
-    echo "\`beautysh\` failed to check the format for the staging scripts!" >&2
-    exit 1
-  fi
-
-  echo "Scripts are formatted correctly!" >&2
+  # Uncomment this check when this issue gets fixed:
+  # https://github.com/lovesegfault/beautysh/issues/283
+  #
+  # if ! type beautysh >/dev/null 2>&1
+  # then
+  #   echo "\`beautysh\` is not installed! You must use it in order to check the scripts are formatted correctly." >&2
+  #   echo "" >&2
+  #   echo "Try running this in order to install it: \`python3 -m pip install beautysh\`" >&2
+  #   exit 1
+  # fi
+  #
+  # if ! (printf "%s" "$staged_scripts" | xargs -d "\n" beautysh --check -i 2)
+  # then
+  #   echo "\`beautysh\` failed to check the format for the staging scripts!" >&2
+  #   exit 1
+  # fi
+  #
+  # echo "Scripts are formatted correctly!" >&2
 fi
 
 exit 0

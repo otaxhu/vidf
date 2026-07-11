@@ -24,13 +24,16 @@ jobs:
 
           shellcheck --version
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.x'
-
-      - name: Install Beautysh
-        run: pip install beautysh
+      # When this beautysh issue gets fixed, uncomment this job:
+      # https://github.com/lovesegfault/beautysh/issues/283
+      #
+      # - name: Set up Python
+      #   uses: actions/setup-python@v6
+      #   with:
+      #     python-version: '3.x'
+      #
+      # - name: Install Beautysh
+      #   run: pip install beautysh
 
       - name: Run ShellCheck Static Analysis
         id: shellcheck_step
@@ -39,17 +42,20 @@ jobs:
           echo "Checking scripts with ShellCheck..."
           shellcheck -x vidf *.sh hooks/*
 
-      - name: Verify Code Formatting (Beautysh)
-        id: beautysh_step
-        continue-on-error: true
-        run: |
-          echo "Verifying code style consistency..."
-          beautysh --check -i 2 vidf *.sh hooks/*
+      # Uncomment this when the beautysh issue above gets fixed.
+      #
+      # - name: Verify Code Formatting (Beautysh)
+      #   id: beautysh_step
+      #   continue-on-error: true
+      #   run: |
+      #     echo "Verifying code style consistency..."
+      #     beautysh --check -i 2 vidf *.sh hooks/*
 
       - name: Check Assertions Status
+        # Uncomment the beautysh check when the issue above gets fixed.
         run: |
-          if [ "${{ steps.shellcheck_step.outcome }}" = "failure" ] ||
-            [ "${{ steps.beautysh_step.outcome }}" = "failure" ]
+          if [ "${{ steps.shellcheck_step.outcome }}" = "failure" ] # ||
+            # [ "${{ steps.beautysh_step.outcome }}" = "failure" ]
           then
             echo "❌ Some QA assertions failed. Review the logs above for ShellCheck or Beautysh errors."
             exit 1
