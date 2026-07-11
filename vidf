@@ -311,6 +311,14 @@ _vidf_menu_navigate()
       ;;
   esac
 
+  if [ "$_VIDF_MENU_N_ROWS" -le 1 ]
+  then
+    _VIDF_MENU_CUR_BYTE_SEQ=
+    # No-op, there is no rows to move to, so there is no need to unrender/render
+    # the pointer in the same place. This stops flickering effect from happening as well.
+    return 0
+  fi
+
   _vidf_menu_unrender_pointer
 
   case "$_VIDF_MENU_CUR_BYTE_SEQ" in
@@ -318,15 +326,11 @@ _vidf_menu_navigate()
       if [ "$_VIDF_MENU_CUR_ROW" -gt 0 ]
       then
         _VIDF_MENU_CUR_ROW="$((_VIDF_MENU_CUR_ROW - 1))"
-
         _vidf_menu_up 1
       else
         # Wrap-around
         _VIDF_MENU_CUR_ROW="$((_VIDF_MENU_N_ROWS - 1))"
-        if [ "$_VIDF_MENU_N_ROWS" -gt 1 ]
-        then
-          _vidf_menu_down "$((_VIDF_MENU_N_ROWS - 1))"
-        fi
+        _vidf_menu_down "$((_VIDF_MENU_N_ROWS - 1))"
       fi
       ;;
     "42")
@@ -337,11 +341,7 @@ _vidf_menu_navigate()
       else
         # Wrap-around
         _VIDF_MENU_CUR_ROW=0
-
-        if [ "$_VIDF_MENU_N_ROWS" -gt 1 ]
-        then
-          _vidf_menu_up "$((_VIDF_MENU_N_ROWS - 1))"
-        fi
+        _vidf_menu_up "$((_VIDF_MENU_N_ROWS - 1))"
       fi
       ;;
   esac
