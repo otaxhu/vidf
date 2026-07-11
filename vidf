@@ -1881,7 +1881,7 @@ vidf()
         local unsupported_targets
         if ! unsupported_targets="$(
           _vidf_echo "$targets_flag" | xargs \
-            jq -rn --arg-json supported "$supported_targets" '
+            jq -rn --argjson supported "$supported_targets" '
               $ARGS.positional[] | select(. as $input | $supported | index($input) | not)
             ' --args --
         )"
