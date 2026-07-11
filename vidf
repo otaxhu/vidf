@@ -117,7 +117,7 @@ _vidf_user_confirms()
   local read_exit_code
   while true
   do
-    read -r opt
+    IFS="" read -r opt
     read_exit_code="$?"
     # Fixes visual bug where if you pipe `yes | vidf ...` you are going to
     # have the lines squished up on the same line.
@@ -498,7 +498,6 @@ _vidf_user_multi_select()
 
   _vidf_menu_unsetup
 
-  local line
   _vidf_echo "$menu_state" | jq -r '.[] | select(.selected) | .name' |
   while IFS="" read -r line
   do
@@ -1153,8 +1152,6 @@ _vidf_git_describe_dirty()
 {
   local install_dir
   install_dir="$1"
-
-  local cur_version
 
   _vidf_git_wt "$install_dir" describe --tags --exact-match --dirty 2>/dev/null ||
   _vidf_git_wt "$install_dir" describe --exact-match --dirty 2>/dev/null
@@ -1907,7 +1904,7 @@ vidf()
           jq -rn --argjson supported "$supported_targets" '
             $supported[]
           ' |
-          while read -r line
+          while IFS="" read -r line
           do
             printf " %s" "$(_vidf_sanitize_arg "$line")"
           done
