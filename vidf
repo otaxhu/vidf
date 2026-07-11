@@ -1382,7 +1382,7 @@ vidf()
       global_format="$global_format,-y"
       ;;
     install)
-      global_format="$global_format,-y,--repair"
+      global_format="$global_format,-y,--repair,-t/--targets:"
       ;;
   esac
 
@@ -1894,8 +1894,10 @@ vidf()
         then
           _vidf_error "The following board targets specified in" \
             "$(_vidf_style_bold)--targets$(_vidf_style_unbold) flag are unsupported for" \
-            "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold):" \
-            "$(_vidf_style_bold)$(_vidf_echo "$unsupported_targets" | tr "\n" " ")$(_vidf_style_unbold)"
+            "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold):"
+          _vidf_error "$(_vidf_style_bold)$(_vidf_echo "$unsupported_targets" | tr "\n" " ")$(_vidf_style_unbold)"
+          _vidf_info "Valid values are:"
+          _vidf_info "$(_vidf_style_bold)$(_vidf_echo "$supported_targets" | jq -r '.[]' | tr "\n" " ")$(_vidf_style_unbold)"
           return 1
         fi
       else
