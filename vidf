@@ -1269,15 +1269,6 @@ USAGE
     vidf <command> [options ...] [--] [arguments ...]
 
 COMMANDS
-    self-update [$(_vidf_style_underline)version$(_vidf_style_ununderline)]
-        Updates $(_vidf_style_bold)vidf$(_vidf_style_unbold) to the latest release. $(:
-        )If a specific $(_vidf_style_underline)version$(_vidf_style_ununderline) $(:
-        )is provided, that version will be installed instead.
-
-        Options:
-            -y
-                Automatic yes to all prompts.
-
     install [$(_vidf_style_underline)version$(_vidf_style_ununderline)]
         Installs $(_vidf_style_bold)ESP-IDF$(_vidf_style_unbold) latest release. If a specific $(:
         )$(_vidf_style_underline)version$(_vidf_style_ununderline) is provided, that version will $(:
@@ -1291,6 +1282,20 @@ COMMANDS
                 Repairs the $(_vidf_style_bold)ESP-IDF$(_vidf_style_unbold) installation if $(:
                 )it's $(_vidf_style_bold)dirty$(_vidf_style_unbold) (git detected modifications) $(:
                 )or $(_vidf_style_bold)corrupted$(_vidf_style_unbold).
+
+            -t, --targets <$(_vidf_style_underline)TARGETS$(_vidf_style_ununderline)>
+                Specify which $(_vidf_style_underline)target boards$(_vidf_style_ununderline) to $(:
+                )install for this $(_vidf_style_bold)ESP-IDF$(_vidf_style_unbold) installation.
+                If not specified, user will be prompted with an interactive menu.
+
+    self-update [$(_vidf_style_underline)version$(_vidf_style_ununderline)]
+        Updates $(_vidf_style_bold)vidf$(_vidf_style_unbold) to the latest release. $(:
+        )If a specific $(_vidf_style_underline)version$(_vidf_style_ununderline) $(:
+        )is provided, that version will be installed instead.
+
+        Options:
+            -y
+                Automatic yes to all prompts.
 
 GLOBAL OPTIONS
     -h, --help
