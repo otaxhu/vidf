@@ -98,6 +98,138 @@ _vidf_read_hex_bytes()
   dd bs="$1" count=1 2>/dev/null | od -vAn -t x1 | xargs
 }
 
+# Executes a command in the background with an interactive progress spinner.
+#
+# $1: Custom message to show alongside spinner
+# $@: Command to execute
+#
+# stdout and stderr are correctly handled, spinner render is directly sent to
+# the current tty. If stderr or stdout are "tty"s, a FIFO is created in order to
+# synchronize the 3 outputs.
+_vidf_progress_command()
+(
+  # Using subshell due to registering global traps
+
+  local message
+  message="$1"
+  shift
+
+  local tty
+  if ! tty="$(tty 2>/dev/null)"
+  then
+    # Don't print any progress, directly execute the command on the foreground
+    "$@"
+    return
+  fi
+
+  # Prevents some race conditions from happening
+  trap '' INT TERM HUP
+
+  local temp_dir
+  local bg_fifo
+  local bg_buffer
+  local temp_buffer
+  if [ -t 1 ] || [ -t 2 ]
+  then
+    temp_dir="$(mktemp -d)"
+
+    bg_fifo="$temp_dir/bg-fifo"
+    mkfifo "$bg_fifo" || return 2
+
+    bg_buffer="$temp_dir/bg-buffer"
+    : >"$bg_buffer"
+
+    temp_buffer="$temp_dir/bg-temp-buffer"
+    : >"$temp_buffer"
+  fi
+
+  local bg_pid
+
+  # Allows for caller redirections, as well as preventing output corruption
+  # on a terminal.
+  if [ -t 1 ] && [ -t 2 ]
+  then
+    "$@" >"$bg_fifo" 2>&1 &
+  elif [ -t 1 ]
+  then
+    "$@" >"$bg_fifo" &
+  elif [ -t 2 ]
+  then
+    "$@" 2>"$bg_fifo" &
+  else
+    "$@" &
+  fi
+  bg_pid="$!"
+
+  trap '
+    kill -TERM "$bg_pid" >/dev/null 2>&1
+    rm -rf "$temp_dir"
+    printf "\r\033[K\033[?25h" >"$tty"
+    _vidf_error "Operation aborted."
+    exit 1
+  ' INT TERM HUP
+
+  printf "\033[?25l" >"$tty"
+
+  local buffer_lines
+
+  local temp
+  local cur_char
+  local spin_chars
+  spin_chars='/-\|'
+
+  while kill -0 "$bg_pid" >/dev/null 2>&1
+  do
+    if [ -n "$bg_fifo" ]
+    then
+      timeout -sINT 0.2 dd if="$bg_fifo" of="$bg_buffer" bs=1 conv=notrunc oflag=append 2>/dev/null
+
+      buffer_lines="$(wc -l < "$bg_buffer")"
+
+      if [ "$buffer_lines" -gt 0 ]
+      then
+        printf "\r\033[K" >"$tty"
+        head -n "$buffer_lines" "$bg_buffer" >"$tty"
+
+        tail -n +"$((buffer_lines + 1))" "$bg_buffer" >"$temp_buffer"
+        mv "$temp_buffer" "$bg_buffer"
+      fi
+    else
+      sleep 0.2
+    fi
+
+    temp="${spin_chars#?}"
+    cur_char="${spin_chars%"$temp"}"
+    spin_chars="${temp}${cur_char}"
+
+    printf "\r\uff3b%s\uff3d %s" "$cur_char" "$message" >"$tty"
+  done
+
+  printf "\r\033[K\033[?25h" >"$tty"
+
+  if [ -n "$bg_fifo" ]
+  then
+    timeout -sINT 0.2 dd if="$bg_fifo" of="$bg_buffer" bs=1 conv=notrunc oflag=append 2>/dev/null
+
+    cat "$bg_buffer" >"$tty"
+
+    # Doesn't end in newline, add one
+    if [ -s "$bg_buffer" ] && [ "$(tail -c1 "$bg_buffer" | wc -l)" -eq 0 ]
+    then
+      _vidf_echo "" >"$tty"
+    fi
+  fi
+
+  # Prevents some race conditions from happening.
+  # Mainly the "kill" line, where if the process has already be waited on,
+  # that line may kill another process completely different with the same pid.
+  trap '' INT TERM HUP
+
+  rm -rf "$temp_dir"
+
+  wait "$bg_pid" >/dev/null 2>&1
+)
+
 # {{{ Interactive function helpers
 # These functions require user interaction
 
