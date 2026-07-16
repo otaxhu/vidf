@@ -778,7 +778,9 @@ _vidf_cache_dir()
 #
 # It outputs to stdout the downloaded file path
 _vidf_download_file()
-{
+(
+  # Using a subshell due to registering global traps
+
   local url
   url="$1"
 
@@ -791,23 +793,204 @@ _vidf_download_file()
   fi
 
   local filename
-  filename="$(basename "$url")"
+  filename="${url%"?"*}"
+  filename="$(basename "$filename")"
 
   filepath="$filepath/$filename"
 
   local etag_path
   etag_path="$filepath.etag"
 
-  if ! curl -fSsLo "$filepath" --etag-save "$etag_path" --etag-compare "$etag_path" "$url"
+  local tty
+  if ! tty="$(tty 2>/dev/null)"
   then
-    _vidf_error "Failed to download $(_vidf_style_bold)$filename$(_vidf_style_unbold)." \
-      "Try again later."
-    return 2
+    # Don't print any progress, directly execute the command on the foreground
+    if ! curl -fSsLo "$filepath" -z "$filepath" --etag-save "$etag_path" --etag-compare "$etag_path" "$url"
+    then
+      _vidf_error "Failed to download $(_vidf_style_bold)$filename$(_vidf_style_unbold)." \
+        "Try again later."
+      return 2
+    fi
+    return 0
   fi
 
-  _vidf_echo "$filepath"
-  return 0
-}
+  # This sends a HEAD request and checks:
+  #
+  # 1. How many bytes there is before starting download
+  # 2. Current cached ETag is valid or not
+  # 3. Current filepath's modtime (If-Modified-Since) is valid or not
+  # 4. And finally the response code for all of this parameters
+  local header
+  header="$(
+    curl -sLIw "%{http_code},%header{Content-Length}" \
+      -z "$filepath" --etag-compare "$etag_path" -o/dev/null "$url"
+  )"
+  local http_code
+  http_code="${header%%,*}"
+  if [ "$http_code" = 304 ]
+  then
+    _vidf_echo "$filepath"
+    return 0
+  fi
+  rm -f "$filepath" "$filepath.etag"
+
+  local content_length
+  content_length="${header#*,}"
+  case "$content_length" in
+    *[!0-9]*)
+      content_length=""
+      ;;
+  esac
+
+  local message
+  message="Downloading $filename..."
+
+  # Prevents some race conditions from happening, as well as possibly passing
+  # this signals down to _vidf_progress_command function
+  trap '' INT TERM HUP
+
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  local err_buffer
+
+  if [ -t 2 ]
+  then
+    err_buffer="$temp_dir/err-buffer"
+    : >"$err_buffer"
+  fi
+
+  if [ -z "$content_length" ] || [ "$content_length" -le 0 ]
+  then
+    # Couldn't determine content length, render simple spinner, no bar
+
+    local curl_exit_code
+    _vidf_progress_command "$message" \
+      curl -fSsLo "$filepath" -z "$filepath" --etag-save "$etag_path" --etag-compare "$etag_path" "$url" \
+      >/dev/null 2>"${err_buffer:-"/dev/null"}"
+    curl_exit_code="$?"
+    if [ "$curl_exit_code" != 0 ]
+    then
+      cat "${err_buffer:-"/dev/null"}" >&2
+      _vidf_error "Failed to download $(_vidf_style_bold)$filename$(_vidf_style_unbold)." \
+        "Try again later."
+    else
+      _vidf_echo "$filepath"
+    fi
+
+    rm -rf "$temp_dir"
+
+    return "$curl_exit_code"
+  fi
+
+  local out_fifo
+  out_fifo="$temp_dir/out-fifo"
+  mkfifo "$out_fifo" || return
+
+  # Race condition where `_vidf_copy_chunk` wins a race by creating $filepath
+  # before curl can extract the modtime of the file, so it will always treat it
+  # as recent cache.
+  #
+  # Extract the modtime before launching curl
+  local modtime
+  modtime="$(date -ur "$filepath" +"%d %b %Y %T GMT" 2>/dev/null)"
+
+  if [ -n "$err_buffer" ]
+  then
+    curl -fSsLz "$modtime" --etag-save "$etag_path" --etag-compare "$etag_path" "$url" \
+      >"$out_fifo" 2>"$err_buffer" &
+  else
+    curl -fSsLz "$modtime" --etag-save "$etag_path" --etag-compare "$etag_path" "$url" \
+      >"$out_fifo" -v &
+  fi
+  local bg_pid
+  bg_pid="$!"
+
+  exec 3<"$out_fifo"
+
+  trap '
+    kill -TERM "$bg_pid" >/dev/null 2>&1
+    rm -rf "$temp_dir"
+    printf "\r\033[K\033[?25h" >"$tty"
+    _vidf_error "Operation aborted."
+    exit 1
+  ' INT TERM HUP
+
+  printf "\033[?25l" >"$tty"
+
+  local bytes_read
+  local bytes_copied
+  bytes_copied=0
+
+  # Progress bar
+  local percentage
+  local filled
+  local empty
+  local bar
+
+  local i
+
+  while kill -0 "$bg_pid" >/dev/null 2>&1
+  do
+    bytes_read="$(_vidf_copy_chunk "$filepath" <&3)"
+
+    bytes_copied="$((bytes_copied + bytes_read))"
+
+    if ! _vidf_progress_can_render_spinner
+    then
+      continue
+    fi
+
+    percentage="$(( (bytes_copied * 100) / content_length ))"
+    [ "$percentage" -gt 100 ] && percentage=100
+
+    # 20 fixed width progress bar
+    filled="$(( (percentage * 20) / 100 ))"
+    empty="$(( 20 - filled ))"
+
+    bar=""
+    i=0
+    while [ "$i" -lt "$filled" ]
+    do
+      bar="$bar="
+      i="$((i + 1))"
+    done
+    i=0
+    while [ "$i" -lt "$empty" ]
+    do
+      bar="$bar-"
+      i="$((i + 1))"
+    done
+
+    _vidf_progress_render_spinner "$message $(printf "\uff3b%s\uff3d" "$bar") $percentage%" >"$tty"
+  done
+
+  # One last flush to the fifo
+  dd of="$filepath" bs=4M conv=notrunc oflag=append <&3 2>/dev/null
+
+  # Prevents some race conditions
+  trap '' INT TERM HUP
+
+  local bg_exit_code
+  wait "$bg_pid" >/dev/null 2>&1;
+  bg_exit_code="$?"
+  if [ "$bg_exit_code" = 0 ]
+  then
+    # Last succesful progress bar render
+    bar="===================="
+    printf "\r\033[K\uff3b\u2714\uff3d %s [%s] 100%%\n" "$message" "$bar" >"$tty"
+    _vidf_echo "$filepath"
+  elif [ -n "$err_buffer" ]
+  then
+    _vidf_err ""
+    cat "$err_buffer" >&2
+    _vidf_error "Failed to download $(_vidf_style_bold)$filename$(_vidf_style_unbold)." \
+      "Try again later"
+  fi
+  printf "\033[?25h" >"$tty"
+  rm -rf "$temp_dir"
+  return "$bg_exit_code"
+)
 
 # Argument-handling functions {{{
 
