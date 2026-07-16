@@ -832,7 +832,7 @@ _vidf_download_file()
     _vidf_echo "$filepath"
     return 0
   fi
-  rm -f "$filepath" "$filepath.etag"
+  rm -f "$filepath" "$etag_path"
 
   local content_length
   content_length="${header#*,}"
@@ -893,7 +893,7 @@ _vidf_download_file()
   #
   # Extract the modtime before launching curl
   local modtime
-  modtime="$(date -ur "$filepath" +"%d %b %Y %T GMT" 2>/dev/null)"
+  modtime="$(LC_ALL=C date -ur "$filepath" +"%d %b %Y %T GMT" 2>/dev/null)"
 
   if [ -n "$err_buffer" ]
   then
