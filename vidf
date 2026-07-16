@@ -98,6 +98,88 @@ _vidf_read_hex_bytes()
   dd bs="$1" count=1 2>/dev/null | od -vAn -t x1 | xargs
 }
 
+# Reads at least 4 megabytes of data from stdin, and appends it to the file path
+# specified by $1, then it prints to stdout the bytes copied.
+#
+# Returns 1 on EOF
+_vidf_copy_chunk()
+{
+  local out_file
+  out_file="$1"
+
+  local bytes_copied
+
+  bytes_copied="$(
+    dd of="$out_file" bs=4M count=1 conv=notrunc oflag=append 2>&1 |
+    awk '/^[0-9]+ bytes/ {print $1}'
+  )"
+  if [ "$bytes_copied" -eq 0 ]
+  then
+    return 1
+  fi
+
+  _vidf_echo "$bytes_copied"
+  return 0
+}
+
+_VIDF_PROGRESS_SPIN_CHARS='/-\|'
+_VIDF_PROGRESS_LAST_SECONDS=
+
+_vidf_progress_render_spinner()
+{
+  local message
+  message="$1"
+
+  local cur_char
+  local temp
+
+  temp="${_VIDF_PROGRESS_SPIN_CHARS#?}"
+  cur_char="${_VIDF_PROGRESS_SPIN_CHARS%"$temp"}"
+  _VIDF_PROGRESS_SPIN_CHARS="${temp}${cur_char}"
+
+  printf "\r\033[K\uff3b%s\uff3d %s" "$cur_char" "$message"
+}
+
+# Renders the spinner after 1 second.
+#
+# You should only be calling this function if you are not performing more work
+# e.g. reached EOF on FIFO and you are just waiting for background process to die.
+_vidf_progress_render_spinner_idle()
+{
+  local message
+  message="$1"
+
+  sleep 1
+  _vidf_progress_render_spinner "$message"
+}
+
+# Returns 0 if at least 1 second has passed since the last call to this function
+# or it's the first time it's called, 1 otherwise.
+#
+# You should only be calling this function if you want to render the spinner,
+# but cannot call `_vidf_progress_render_spinner_idle` because you have to
+# perform work.
+_vidf_progress_can_render_spinner()
+{
+  if [ -z "$_VIDF_PROGRESS_LAST_SECONDS" ]
+  then
+    _VIDF_PROGRESS_LAST_SECONDS="$(date +%s)"
+    return 0
+  fi
+
+  local cur_secs
+  cur_secs="$(date +%s)"
+
+  if [ "$_VIDF_PROGRESS_LAST_SECONDS" = "$cur_secs" ]
+  then
+    return 1
+  fi
+
+  _VIDF_PROGRESS_LAST_SECONDS="$cur_secs"
+
+  return 0
+}
+
 # Executes a command in the background with an interactive progress spinner.
 #
 # $1: Custom message to show alongside spinner
@@ -106,6 +188,12 @@ _vidf_read_hex_bytes()
 # stdout and stderr are correctly handled, spinner render is directly sent to
 # the current tty. If stderr or stdout are "tty"s, a FIFO is created in order to
 # synchronize the 3 outputs.
+#
+# This function works specifically for commands that always output something to
+# stderr/stdout, or stderr/stdout are closed by the command itself beforehand,
+# otherwise the spinner won't appear due to dd being blocked waiting for data.
+# In this specific app, it's used during file downloads. Always prefer to redirect
+# the outputs if you are not sure if they output data regularly.
 _vidf_progress_command()
 (
   # Using subshell due to registering global traps
@@ -161,6 +249,11 @@ _vidf_progress_command()
   fi
   bg_pid="$!"
 
+  if [ -n "$bg_fifo" ]
+  then
+    exec 3<"$bg_fifo"
+  fi
+
   trap '
     kill -TERM "$bg_pid" >/dev/null 2>&1
     rm -rf "$temp_dir"
@@ -172,44 +265,45 @@ _vidf_progress_command()
   printf "\033[?25l" >"$tty"
 
   local buffer_lines
-
-  local temp
-  local cur_char
-  local spin_chars
-  spin_chars='/-\|'
+  local eof
+  eof=0
 
   while kill -0 "$bg_pid" >/dev/null 2>&1
   do
-    if [ -n "$bg_fifo" ]
+    if [ -z "$bg_fifo" ] || [ "$eof" = 1 ]
     then
-      timeout -sINT 0.2 dd if="$bg_fifo" of="$bg_buffer" bs=1 conv=notrunc oflag=append 2>/dev/null
-
-      buffer_lines="$(wc -l < "$bg_buffer")"
-
-      if [ "$buffer_lines" -gt 0 ]
-      then
-        printf "\r\033[K" >"$tty"
-        head -n "$buffer_lines" "$bg_buffer" >"$tty"
-
-        tail -n +"$((buffer_lines + 1))" "$bg_buffer" >"$temp_buffer"
-        mv "$temp_buffer" "$bg_buffer"
-      fi
-    else
-      sleep 0.2
+      _vidf_progress_render_spinner_idle "$message" >"$tty"
+      continue
     fi
 
-    temp="${spin_chars#?}"
-    cur_char="${spin_chars%"$temp"}"
-    spin_chars="${temp}${cur_char}"
+    if ! _vidf_copy_chunk "$bg_buffer" <&3 >/dev/null
+    then
+      eof=1
+      continue
+    fi
 
-    printf "\r\uff3b%s\uff3d %s" "$cur_char" "$message" >"$tty"
+    buffer_lines="$(wc -l < "$bg_buffer")"
+    if [ "$buffer_lines" -gt 0 ]
+    then
+      printf "\r\033[K" >"$tty"
+      head -n "$buffer_lines" "$bg_buffer" >"$tty"
+
+      tail -n +"$((buffer_lines + 1))" "$bg_buffer" >"$temp_buffer"
+      mv "$temp_buffer" "$bg_buffer"
+    fi
+
+    if _vidf_progress_can_render_spinner
+    then
+      _vidf_progress_render_spinner "$message" >"$tty"
+    fi
   done
 
   printf "\r\033[K\033[?25h" >"$tty"
 
   if [ -n "$bg_fifo" ]
   then
-    timeout -sINT 0.2 dd if="$bg_fifo" of="$bg_buffer" bs=1 conv=notrunc oflag=append 2>/dev/null
+    # One last flush to the fifo
+    dd of="$bg_buffer" bs=4M conv=notrunc oflag=append <&3 2>/dev/null
 
     cat "$bg_buffer" >"$tty"
 
