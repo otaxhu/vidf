@@ -2255,8 +2255,16 @@ vidf()
         repair_flag=0
       else
         local cur_version
-        if cur_version="$(_vidf_git_describe_dirty "$install_dir")"
+        # Unapply patches temporarily in order to correctly check dirtiness
+        if git -c core.fileMode=false \
+          apply --directory="$install_dir" -R --unsafe-paths --verbose \
+          "$vidf_install_dir"/patches/esp-idf/*.patch &&
+          cur_version="$(_vidf_git_describe_dirty "$install_dir")"
         then
+          # Reapply patches again
+          git -c core.fileMode=false \
+            apply --no-index --directory="$install_dir" --unsafe-paths \
+            "$vidf_install_dir"/patches/esp-idf/*.patch
           if [ "$cur_version" != "${cur_version%"-dirty"}" ]
           then
             _vidf_warn "Detected modifications to" \

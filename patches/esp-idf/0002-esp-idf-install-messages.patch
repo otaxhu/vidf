@@ -1,0 +1,16 @@
+From: otaxhu <oscarperniamoreno@gmail.com>
+Date: Thu, 16 Jul 2026 20:30:22 -0400
+Subject: [PATCH] Remove echo messages from install.sh
+
+diff --git a/install.sh b/install.sh
+--- a/install.sh
++++ b/install.sh
+@@ -34,8 +34,3 @@ FEATURES=$("${ESP_PYTHON}" "${IDF_PATH}/tools/install_util.py" extract features
+ 
+ echo "Installing Python environment and packages"
+ "${ESP_PYTHON}" "${IDF_PATH}/tools/idf_tools.py" install-python-env --features="${FEATURES}"
+-
+-echo "All done! You can now run:"
+-echo ""
+-echo "  . ${basedir}/export.sh"
+-echo ""
