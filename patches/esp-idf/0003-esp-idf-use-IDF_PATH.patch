@@ -1,0 +1,24 @@
+From: otaxhu <oscarperniamoreno@gmail.com>
+Date: Fri, 17 Jul 2026 13:42:03 -0400
+Subject: [PATCH] Always use IDF_PATH if defined
+
+diff --git a/export.sh b/export.sh
+--- a/export.sh
++++ b/export.sh
+@@ -27,15 +27,7 @@ then
+     shell_type="zsh"
+ elif [ -n "${IDF_PATH-}" ]
+ then
+-    if [ -f "/.dockerenv" ]
+-    then
+-        echo "Using the IDF_PATH found in the environment as docker environment detected."
+-        idf_path=$IDF_PATH
+-    elif [ -n "${IDF_PATH_FORCE-}" ]
+-    then
+-        echo "Using the forced IDF_PATH found in the environment."
+-        idf_path=$IDF_PATH
+-    fi
++    idf_path=$IDF_PATH
+ fi
+ 
+ if [ ! -f "${idf_path}/tools/idf.py" ] ||
