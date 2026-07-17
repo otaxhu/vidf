@@ -1399,7 +1399,7 @@ _vidf_git_base()
   local install_dir
   install_dir="$1"
   shift
-  git --git-dir="$install_dir/.git" "$@"
+  git -c core.fileMode=false --git-dir="$install_dir/.git" "$@"
 }
 
 _vidf_git_wt()
@@ -2257,7 +2257,7 @@ vidf()
         local cur_version
         # Unapply patches temporarily in order to correctly check dirtiness
         if git -c core.fileMode=false \
-          apply --directory="$install_dir" -R --unsafe-paths --verbose \
+          apply --directory="$install_dir" -R --unsafe-paths --quiet \
           "$vidf_install_dir"/patches/esp-idf/*.patch &&
           cur_version="$(_vidf_git_describe_dirty "$install_dir")"
         then
