@@ -2245,9 +2245,13 @@ vidf()
         return 2
       fi
 
+      # Directory where ESP-IDF's tools are going to be installed into
+      local tools_install_dir
+      tools_install_dir="$idf_versions_dir/$idf_version_tag/tools"
+
       # Directory where ESP-IDF is going to be cloned into.
       local install_dir
-      install_dir="$idf_versions_dir/$idf_version_tag"
+      install_dir="$idf_versions_dir/$idf_version_tag/esp-idf"
 
       if ! [ -d "$install_dir/.git" ]
       then
@@ -2383,7 +2387,7 @@ vidf()
       fi
 
       _vidf_info "Running $(_vidf_style_bold)install.sh$(_vidf_style_unbold)..."
-      if ! _vidf_echo "$targets_flag" | xargs sh -- "$install_dir/install.sh"
+      if ! _vidf_echo "$targets_flag" | IDF_TOOLS_PATH="$tools_install_dir" xargs sh -- "$install_dir/install.sh"
       then
         _vidf_error "$(_vidf_style_bold)install.sh$(_vidf_style_unbold) failed to run"
         return 2
