@@ -33,6 +33,32 @@
 
 _VIDF_VERSION="0.1.0-devel"
 
+_vidf_check_deps()
+{
+  local exit_code
+  exit_code=0
+
+  local missing
+
+  local i
+  for i in "$@"
+  do
+    if ! _vidf_has "$i"
+    then
+      exit_code=1
+      missing="${missing:+"$missing "}$i"
+    fi
+  done
+  if [ "$exit_code" = 1 ]
+  then
+    _vidf_error "The following required commands were not found on" \
+      "$(_vidf_style_underline)PATH$(_vidf_style_ununderline):" \
+      "$(_vidf_style_bold)$missing$(_vidf_style_unbold)"
+  fi
+
+  return "$exit_code"
+}
+
 _vidf_is_sourced ()
 {
   if [ -n "$ZSH_VERSION" ]
@@ -1932,17 +1958,21 @@ vidf()
       ;;
   esac
 
+  # Guard-clause required external dependencies for subcommands
   case "$subcommand" in
     self-update)
-      if ! _vidf_has git
-      then
-        _vidf_error "$(_vidf_style_bold)git$(_vidf_style_unbold) not found on" \
-          "$(_vidf_style_underline)PATH$(_vidf_style_ununderline)," \
-          "this is a required dependency for the" \
-          "$(_vidf_style_bold)self-update$(_vidf_style_unbold) subcommand."
-        return 1
-      fi
+      _vidf_check_deps git || return
+      ;;
+    install)
+      _vidf_check_deps git python jq curl || return
+      ;;
+    use)
+      _vidf_check_deps jq || return
+      ;;
+  esac
 
+  case "$subcommand" in
+    self-update)
       local yes_flag
       if ! eval "$(_vidf_parse_args_eval 0-1,-y yes_flag "$@")"
       then
@@ -2080,43 +2110,6 @@ vidf()
       fi
       ;;
     install)
-      local missing_dep
-      missing_dep=0
-      if ! _vidf_has git
-      then
-        missing_dep=1
-        _vidf_error "$(_vidf_style_bold)git$(_vidf_style_unbold) not found on" \
-          "$(_vidf_style_underline)PATH$(_vidf_style_ununderline)," \
-          "this is a required dependency for the" \
-          "$(_vidf_style_bold)install$(_vidf_style_unbold) subcommand."
-      fi
-      if ! _vidf_has python \
-        && ! _vidf_has python3
-      then
-        missing_dep=1
-        _vidf_error "$(_vidf_style_bold)python$(_vidf_style_unbold) not found on" \
-          "$(_vidf_style_underline)PATH$(_vidf_style_ununderline)," \
-          "this is a required dependency for the" \
-          "$(_vidf_style_bold)install$(_vidf_style_unbold) subcommand."
-      fi
-      if ! _vidf_has curl
-      then
-        missing_dep=1
-        _vidf_error "$(_vidf_style_bold)curl$(_vidf_style_unbold) not found on" \
-          "$(_vidf_style_underline)PATH$(_vidf_style_ununderline)," \
-          "this is a required dependency for the" \
-          "$(_vidf_style_bold)install$(_vidf_style_unbold) subcommand."
-      fi
-      if ! _vidf_has jq
-      then
-        missing_dep=1
-        _vidf_error "$(_vidf_style_bold)jq$(_vidf_style_unbold) not found on" \
-          "$(_vidf_style_underline)PATH$(_vidf_style_ununderline)," \
-          "this is a required dependency for the" \
-          "$(_vidf_style_bold)install$(_vidf_style_unbold) subcommand."
-      fi
-      [ "$missing_dep" = 1 ] && return 1
-
       local yes_flag
       local repair_flag
       local targets_flag
