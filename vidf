@@ -1704,6 +1704,12 @@ USAGE
     vidf <command> [options ...] [--] [arguments ...]
 
 COMMANDS
+    use [$(_vidf_style_underline)version$(_vidf_style_ununderline)]
+        Activates the last activated ESP-IDF environment. The first time is run, you have to
+        specify the $(_vidf_style_underline)version$(_vidf_style_ununderline), for subsequent $(:
+        )activations, the $(_vidf_style_underline)version$(_vidf_style_ununderline) argument is optional,
+        in which case the last activated ESP-IDF version will be activated.
+
     install [$(_vidf_style_underline)version$(_vidf_style_ununderline)]
         Installs $(_vidf_style_bold)ESP-IDF$(_vidf_style_unbold) latest release. If a specific $(:
         )$(_vidf_style_underline)version$(_vidf_style_ununderline) is provided, that version will $(:
@@ -1946,7 +1952,7 @@ vidf()
     self-update)
       # self-update doesn't require app dir to be present, since it creates it.
       ;;
-    install)
+    install|use)
       # Add to pattern above subcommands that require the app dir to be present
       if ! [ -d "$(_vidf_app_dir)" ]
       then
@@ -2400,6 +2406,73 @@ vidf()
       _vidf_err "$(_vidf_style_bold)" # Command start block
       _vidf_err "  vidf use $(_vidf_sanitize_arg "$idf_version_tag")"
       _vidf_err "$(_vidf_style_unbold)" # Command end block
+      ;;
+    "use")
+      if ! eval "$(_vidf_parse_args_eval 0-1 "$@")"
+      then
+        return 1
+      fi
+      local version_tag
+      version_tag="$1"
+
+      local root_dir
+      if ! root_dir="$(_vidf_app_dir)"
+      then
+        return 1
+      fi
+
+      local idf_versions_dir
+      idf_versions_dir="$root_dir/idf-versions"
+
+      local config_json
+      config_json="$root_dir/config.json"
+
+      if [ -z "$version_tag" ]
+      then
+        if [ -f "$config_json" ]
+        then
+          version_tag="$(jq -r '.last_active // empty' "$config_json")"
+        fi
+        if [ -z "$version_tag" ]
+        then
+          # Ambiguous state, don't assume what the user wants
+          _vidf_error "Please specify a" \
+            "$(_vidf_style_bold)version$(_vidf_style_unbold) argument"
+          return 1
+        fi
+        _vidf_success "Using last active environment:" \
+          "$(_vidf_style_bold)$version_tag$(_vidf_style_unbold)"
+      else
+        local current_json
+        current_json="{}"
+
+        if [ -f "$config_json" ]
+        then
+          current_json="$(cat "$config_json")"
+        fi
+
+        local temp_json
+        temp_json="$(mktemp)"
+
+        if ! _vidf_echo "$current_json" | jq -c --arg tag "$version_tag" '.last_active = $tag' >"$temp_json" ||
+          ! mv -f "$temp_json" "$config_json"
+        then
+          rm -f "$temp_json"
+          _vidf_error "Failed to update local configuration"
+          return 1
+        fi
+      fi
+
+      local idf_install_dir
+      idf_install_dir="$idf_versions_dir/$version_tag/esp-idf"
+      local idf_tools_dir
+      idf_tools_dir="$idf_versions_dir/$version_tag/tools"
+
+      export IDF_PATH="$idf_install_dir"
+      export IDF_TOOLS_PATH="$idf_tools_dir"
+
+      # shellcheck source=/dev/null
+      . "$idf_install_dir/export.sh"
       ;;
     *)
       _vidf_error "Unknown subcommand: $subcommand"
