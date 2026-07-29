@@ -1,0 +1,12 @@
+[project]
+name = "vidf-lib"
+version = "0.1.0"
+description = "CLI library utilities and helper functions for vidf project"
+requires-python = ">=3.14"
+dependencies = [
+    "httpx2[http2]>=2.9.1",
+    "rich>=15.0.0",
+]
+
+[tool.ruff.format]
+quote-style = "double"
