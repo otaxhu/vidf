@@ -77,12 +77,11 @@ async def run_progress_command(
     on_success = on_success or ""
     on_success = (
         rich.markup.escape(on_success)
-        or f"[bold]{rich.markup.escape(' '.join(cmd))}[/] completed succesfully"
+        or f"{rich.markup.escape(' '.join(cmd))} completed succesfully"
     )
     on_fail = on_fail or ""
     on_fail = (
-        rich.markup.escape(on_fail)
-        or f"[bold]{rich.markup.escape(' '.join(cmd))}[/] failed"
+        rich.markup.escape(on_fail) or f"{rich.markup.escape(' '.join(cmd))} failed"
     )
 
     try:
