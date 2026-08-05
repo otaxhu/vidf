@@ -1,13 +1,17 @@
 import argparse
+import aiofiles
 import asyncio
 from datetime import datetime, timezone
+import functools
 import httpx2
 import os
 import pathlib
 import re
 import signal
 import sys
-from typing import List, Optional, TextIO
+from dataclasses import dataclass
+from http import HTTPStatus
+from typing import List, Optional, TextIO, Self
 from urllib.parse import urlsplit, unquote as urlunquote
 
 import rich.markup
@@ -15,9 +19,25 @@ import rich.highlighter
 import rich.theme
 from rich.text import Text
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TaskID,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
+)
 
-err_console = Console(stderr=True, style="red")
+TimeRemainingColumn = functools.partial(
+    TimeRemainingColumn, compact=True, elapsed_when_finished=True
+)
+
+CHECKMARK_CHAR = Text("\u2714", style="green bold")
+CROSSMARK_CHAR = Text("\u2718", style="red bold")
+
+err_console = Console(stderr=True)
+error_console = Console(stderr=True, style="red")
 
 # Is used in the highlighters
 cmd_theme = rich.theme.Theme({"cmd": "bold"})
@@ -36,33 +56,150 @@ def format_http_date(timestamp: float) -> str:
     return dt.strftime("%a, %d %b %Y %H:%M:%S GMT")
 
 
+@dataclass
+class DownloadTask:
+    """
+    Model class that holds the rich's TaskID together with the
+    download url it belongs to
+    """
+
+    task_id: TaskID
+    url: str
+    filename: str
+
+    @classmethod
+    def from_url(cls, task_id: TaskID, url: str) -> Self:
+        parsed_url = urlsplit(url)
+        filename = urlunquote(pathlib.Path(parsed_url.path).name)
+        return cls(task_id=task_id, url=url, filename=filename)
+
+
 async def run_download_file(urls: List[str], out_dir: str) -> int:
+    urls = list(set(urls))
 
     os.makedirs(out_dir, exist_ok=True, mode=0o755)
     exit_code = 0
 
-    async with httpx2.AsyncClient(
-        http2=True,
-        follow_redirects=True,
-    ) as client:
+    spinner_col = SpinnerColumn(spinner_name="dots", finished_text=CROSSMARK_CHAR)
+
+    with Progress(
+        spinner_col,
+        TextColumn("{task.description}"),
+        BarColumn(),
+        TimeRemainingColumn(),
+        TransferSpeedColumn(),
+        TextColumn("{task.fields[info]}", style="dim"),
+        console=err_console,
+    ) as progress:
+        download_tasks_list: list[DownloadTask] = []
+
         for url in urls:
-            parsed_url = urlsplit(url)
-            filename = urlunquote(pathlib.Path(parsed_url.path).name)
-            outpath = os.path.join(out_dir, filename)
-            tmppath = f"{outpath}.tmp"
+            download_tasks_list.append(
+                DownloadTask.from_url(
+                    progress.add_task(
+                        f"Downloading [bold]{rich.markup.escape(url)}[/]",
+                        total=None,
+                        start=False,
+                        # Extra fields
+                        info="",
+                    ),
+                    url,
+                )
+            )
 
-            headers = {}
-            local_mtime: Optional[float] = None
+        async with httpx2.AsyncClient(
+            http2=True,
+            follow_redirects=True,
+        ) as client:
 
-            if os.path.exists(outpath) and os.path.isfile(outpath):
-                local_mtime = os.path.getmtime(outpath)
-                headers["If-Modified-Since"] = format_http_date(local_mtime)
+            async def download_worker(download_task: DownloadTask):
+                task_id = download_task.task_id
+                filename = download_task.filename
+                url = download_task.url
 
-            # TODO: Get the resource's headers, check cache-related headers,
-            # and proceed with either the cached resource, or send a GET request
-            # to the resource.
-            async with client.stream("HEAD", url) as res:
-                ...
+                nonlocal exit_code
+
+                outpath = os.path.join(out_dir, filename)
+                tmppath = f"{outpath}.tmp"
+
+                headers = {}
+                local_mtime: Optional[float] = None
+
+                if os.path.exists(outpath) and os.path.isfile(outpath):
+                    local_mtime = os.path.getmtime(outpath)
+                    headers["If-Modified-Since"] = format_http_date(local_mtime)
+
+                try:
+                    async with client.stream("GET", url, headers=headers) as res:
+                        content_len: Optional[int] = (
+                            None  # In order to not render progress bar if Content-Length header is missing
+                        )
+                        try:
+                            content_len = int(res.headers["Content-Length"])
+                        except KeyError, ValueError:
+                            pass
+
+                        progress.update(task_id, total=content_len)
+                        progress.start_task(task_id)
+
+                        remote_mtime: Optional[float] = None
+                        try:
+                            remote_mtime = parse_http_date(res.headers["Last-Modified"])
+                        except KeyError:
+                            pass
+
+                        if res.status_code == HTTPStatus.NOT_MODIFIED or (
+                            res.is_success  # Simulate HTTP 304 response code
+                            and local_mtime
+                            and remote_mtime
+                            and remote_mtime <= local_mtime
+                        ):
+                            spinner_col.finished_text = CHECKMARK_CHAR
+                            progress.update(
+                                task_id, total=1, advance=1, info="(Cache hit)"
+                            )
+                            return
+
+                        res.raise_for_status()
+
+                        # Warn about response codes other than 200
+                        if res.status_code != HTTPStatus.OK:
+                            progress.update(
+                                task_id,
+                                info=f"([yellow]Got HTTP {res.status_code} code, expected 200[/], attempting to download)",
+                            )
+
+                        async with aiofiles.open(tmppath, "wb") as temp:
+                            async for bb in res.aiter_bytes():
+                                await temp.write(bb)
+                                progress.update(task_id, advance=len(bb))
+
+                        spinner_col.finished_text = CHECKMARK_CHAR
+                        progress.update(task_id, total=1, completed=1)
+                        os.replace(tmppath, outpath)
+
+                except BaseException as e:
+                    exit_code = 1
+                    if isinstance(e, httpx2.HTTPStatusError):
+                        progress.update(
+                            task_id,
+                            info=f"([red]HTTP {e.response.status_code} error[/])",
+                        )
+                    elif not isinstance(e, asyncio.CancelledError):
+                        progress.update(
+                            task_id,
+                            info=f"([red]Got error: {rich.markup.escape(str(e))}[/])",
+                        )
+                    # Re-raise after identifying the download that failed
+                    raise
+
+            try:
+                async with asyncio.TaskGroup() as tg:
+                    for dt in download_tasks_list:
+                        tg.create_task(download_worker(dt))
+            except* httpx2.RequestError:
+                # TODO: Network related errors
+                pass
 
     return exit_code
 
@@ -71,7 +208,7 @@ async def run_progress_command(
     cmd: List[str], message: str, on_success: str, on_fail: str
 ) -> int:
     if len(cmd) == 0:
-        err_console.print("You must specify at least 1 argument")
+        error_console.print("You must specify at least 1 argument")
         return 2
 
     on_success = on_success or ""
@@ -97,16 +234,15 @@ async def run_progress_command(
         try:
             os.execvp(cmd[0], cmd)
         except FileNotFoundError:
-            err_console.print("Command not found:", Text(f"{cmd[0]}", style="red bold"))
+            error_console.print(
+                "Command not found:", Text(f"{cmd[0]}", style="red bold")
+            )
             return 127
 
     stdout_is_tty = sys.stdout.isatty()
     stderr_is_tty = sys.stderr.isatty()
 
-    spinner_col = SpinnerColumn(
-        spinner_name="dots",
-        finished_text=Text("\u2718", style="red bold"),
-    )
+    spinner_col = SpinnerColumn(spinner_name="dots", finished_text=CROSSMARK_CHAR)
 
     highlighter = rich.highlighter.RegexHighlighter()
     highlighter.highlights = [rf"(^|\s+)(?P<cmd>{re.escape(cmd[0])})(\s|$)"]
@@ -160,7 +296,7 @@ async def run_progress_command(
         if exit_code != 0:
             text_col.style = "red"
         else:
-            spinner_col.finished_text = Text("\u2714", style="green bold")
+            spinner_col.finished_text = CHECKMARK_CHAR
             text_col.style = "green"
             progress.update(task_id, description=on_success)
 
@@ -251,4 +387,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except asyncio.CancelledError:
-        err_console.print("Operation aborted")
+        error_console.print("Operation aborted")
+        sys.exit(1)
