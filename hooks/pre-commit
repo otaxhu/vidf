@@ -9,6 +9,19 @@ then
   exit "$?"
 fi
 
+if ! type uv >/dev/null 2>&1
+then
+  echo "\`uv\` is not installed! You must use it in order to automatically generate" >&2
+  echo "the 'requirements.txt' file." >&2
+  exit 1
+fi
+uv sync
+uv export --format requirements.txt -o requirements.txt
+if ! git diff --quiet requirements.txt
+then
+  echo "Add the new changes to requirements.txt and commit them." >&2
+fi
+
 git_top_level="$(git rev-parse --show-toplevel)"
 
 staged_scripts="$(git diff --cached --name-only --diff-filter=d |
