@@ -20,6 +20,7 @@ uv export --format requirements.txt -o requirements.txt
 if ! git diff --quiet requirements.txt
 then
   echo "Add the new changes to requirements.txt and commit them." >&2
+  exit 1
 fi
 
 git_top_level="$(git rev-parse --show-toplevel)"
