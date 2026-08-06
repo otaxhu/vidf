@@ -797,6 +797,47 @@ _vidf_cache_dir()
   return 0
 }
 
+# vidf-lib.py helper and entrypoint functions {{{
+
+# Prints the python interpreter for vidf-lib.py
+_vidf_lib_python()
+{
+  _vidf_echo "$VIDF_DIR/vidf/.venv/bin/python"
+}
+
+# Returns 0 if vidf-lib.py can run, 1 otherwise, depending on whether
+# the virtual environment was initialized
+_vidf_lib_can_run()
+{
+  local vidf_python
+  vidf_python="$(_vidf_lib_python)"
+
+  # TODO: Very vague check, since it doesn't check if the dependencies
+  # are actually installed
+  [ -f "$vidf_python" ] && [ -x "$vidf_python" ]
+}
+
+# Initializes the virtual environment for vidf-lib.py script
+_vidf_lib_init()
+{
+  local project_dir
+  project_dir="$VIDF_DIR/vidf"
+
+  python -m venv "$project_dir/.venv" &&
+  "$(_vidf_lib_python)" -m pip install -r "$project_dir/requirements.txt"
+}
+
+# Entry point to vidf-lib.py script
+_vidf_lib()
+{
+  local project_dir
+  project_dir="$VIDF_DIR/vidf"
+
+  "$(_vidf_lib_python)" "$project_dir/vidf-lib.py" "$@"
+}
+
+# }}}
+
 # Downloads a file using curl, and saves it into the app cache directory,
 # it also saves a .etag file that stores the resource's ETag the server returned,
 # to be send in future requests to help with server-side caching.
@@ -1808,6 +1849,8 @@ vidf()
 
   _vidf_export_vidf_dir
 
+  _vidf_check_deps python || return
+
   # {{{
   # Extract and filter out subcommand, canonize user's arguments, filter and
   # handle all global options from the canonized arguments.
@@ -1971,7 +2014,7 @@ vidf()
       _vidf_check_deps git || return
       ;;
     install)
-      _vidf_check_deps git python jq curl || return
+      _vidf_check_deps git jq curl || return
       ;;
     use)
       _vidf_check_deps jq || return
@@ -2087,6 +2130,7 @@ vidf()
       fi
 
       _vidf_git_ensure_switch "$install_dir" "$repo_url" "$version_tag" || return
+      _vidf_lib_init || return
 
       if [ "$is_installing" = 1 ]
       then
