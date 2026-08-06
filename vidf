@@ -1787,12 +1787,14 @@ vidf()
       _vidf_info "Checking target board compatibility for" \
         "$(_vidf_style_bold)ESP-IDF ($idf_version_tag)$(_vidf_style_unbold)..."
 
-      local idf_versions_json
-      if ! idf_versions_json="$(_vidf_download_file "https://dl.espressif.com/dl/esp-idf/idf_versions.json")"
+      if ! _vidf_download_file "https://dl.espressif.com/dl/esp-idf/idf_versions.json"
       then
         _vidf_error "Couldn't determine available target boards"
         return 2
       fi
+
+      local idf_versions_json
+      idf_versions_json="$(_vidf_cache_dir)/idf_versions.json"
 
       local is_original_json
       ! jq -e 'type == "object"' "$idf_versions_json" >/dev/null
