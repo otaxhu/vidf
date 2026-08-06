@@ -763,25 +763,24 @@ _vidf_user_multi_select()
 
 # }}}
 
-_vidf_app_dir()
+# Checks that VIDF_DIR variable is an absolute path, if it's not or is empty
+# it's set to a default value, then exports it
+_vidf_export_vidf_dir()
 {
   local app_dir
-  app_dir="${VIDF_DIR:-"$HOME/.vidf"}"
+  app_dir="${VIDF_DIR:-}"
 
   if [ "$app_dir" = "${app_dir#/}" ]
   then
     if [ -n "${VIDF_DIR:-}" ]
     then
-      _vidf_error "$(_vidf_style_underline)VIDF_DIR$(_vidf_style_ununderline)" \
-        "variable must be an absolute path."
-    else
-      _vidf_error "$(_vidf_style_underline)HOME$(_vidf_style_ununderline)" \
-        "variable must be an absolute path."
+      _vidf_warn "$(_vidf_style_underline)VIDF_DIR$(_vidf_style_ununderline)" \
+        "is not an absolute path, falling back to" \
+        "$(_vidf_style_bold)\$HOME/.vidf$(_vidf_style_unbold)"
     fi
-    return 1
+    VIDF_DIR="$HOME/.vidf"
   fi
-
-  _vidf_echo "$app_dir"
+  export VIDF_DIR
   return 0
 }
 
@@ -1807,6 +1806,8 @@ vidf()
   # First setup based on tty detection.
   _vidf_style_setup
 
+  _vidf_export_vidf_dir
+
   # {{{
   # Extract and filter out subcommand, canonize user's arguments, filter and
   # handle all global options from the canonized arguments.
@@ -1954,7 +1955,7 @@ vidf()
       ;;
     install|use)
       # Add to pattern above subcommands that require the app dir to be present
-      if ! [ -d "$(_vidf_app_dir)" ]
+      if ! [ -d "$VIDF_DIR" ]
       then
         _vidf_error "$(_vidf_style_bold)vidf$(_vidf_style_unbold) installation not found."
         _vidf_info "To install it, run: $(_vidf_style_bold)vidf self-update$(_vidf_style_unbold)"
@@ -1986,10 +1987,7 @@ vidf()
       fi
 
       local root_dir
-      if ! root_dir="$(_vidf_app_dir)"
-      then
-        return 1
-      fi
+      root_dir="$VIDF_DIR"
 
       # Where vidf is going to be cloned into.
       local install_dir
@@ -2125,10 +2123,7 @@ vidf()
       fi
 
       local root_dir
-      if ! root_dir="$(_vidf_app_dir)"
-      then
-        return 1
-      fi
+      root_dir="$VIDF_DIR"
 
       local vidf_install_dir
       vidf_install_dir="$root_dir/vidf"
@@ -2416,10 +2411,7 @@ vidf()
       version_tag="$1"
 
       local root_dir
-      if ! root_dir="$(_vidf_app_dir)"
-      then
-        return 1
-      fi
+      root_dir="$VIDF_DIR"
 
       local idf_versions_dir
       idf_versions_dir="$root_dir/idf-versions"
@@ -2487,7 +2479,7 @@ then
   # Initial setup for colors
   _VIDF_STYLE_SETUP=1 vidf "$@" || exit "$?"
 
-  if ! [ -e "$(_vidf_app_dir)" ]
+  if ! [ -e "$VIDF_DIR" ]
   then
     # Assume the user is running the script for the first time and is
     # piping it, most likely from curl.
@@ -2500,7 +2492,7 @@ then
     if [ "$_EXIT_CODE" != 0 ]
     then
       _vidf_error "Cleaning up failed installation..."
-      rm -rf "$(_vidf_app_dir)"
+      rm -rf "$VIDF_DIR"
     fi
 
     exit "$_EXIT_CODE"
